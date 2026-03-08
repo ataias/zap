@@ -1,4 +1,5 @@
 const std = @import("std");
+const integration = @import("test/integration.zig");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -39,4 +40,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     b.installArtifact(math_exe);
+
+    const integration_step = integration.addIntegrationTests(b, add_exe, math_exe, zap_mod);
+    test_step.dependOn(integration_step);
 }
