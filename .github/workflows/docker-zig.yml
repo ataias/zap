@@ -1,0 +1,69 @@
+name: Build Zig Docker Images
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # daily at 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  packages: write
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build-stable:
+    runs-on: ubuntu-latest
+    env:
+      ZIG_VERSION: "0.15.2"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: docker
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ github.repository_owner }}/zig:${{ env.ZIG_VERSION }}
+          build-args: |
+            ZIG_VERSION=${{ env.ZIG_VERSION }}
+            ZIG_URL=https://zigmirror.com/zig-x86_64-linux-${{ env.ZIG_VERSION }}.tar.xz
+
+  build-master:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve latest master URL
+        id: master
+        run: |
+          INDEX=$(curl -fsSL https://ziglang.org/download/index.json)
+          TARBALL=$(echo "$INDEX" | jq -r '.master."x86_64-linux".tarball')
+          FILENAME=$(basename "$TARBALL")
+          URL="https://zigmirror.com/${FILENAME}"
+          VERSION=$(echo "$INDEX" | jq -r '.master.version')
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: docker
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/zig:master
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/zig:${{ steps.master.outputs.version }}
+          build-args: |
+            ZIG_VERSION=${{ steps.master.outputs.version }}
+            ZIG_URL=${{ steps.master.outputs.url }}

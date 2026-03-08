@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_run:
+    workflows: ["Build Zig Docker Images"]
+    types: [completed]
+
+permissions:
+  packages: read
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        zig-tag: ["0.15.2", "master"]
+    container:
+      image: ${{ env.REGISTRY }}/${{ github.repository_owner }}/zig:${{ matrix.zig-tag }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: zig version
+        run: zig version
+
+      - name: build
+        run: zig build
+
+      - name: test
+        run: zig build test
