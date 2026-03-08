@@ -10,12 +10,12 @@ pub const ParseError = error{
     HelpRequested,
 };
 
-pub fn printError(comptime fmt: []const u8, args: anytype) void {
-    std.debug.print("error: " ++ fmt ++ "\n", args);
+pub fn printError(reporter: *std.Io.Writer, comptime fmt: []const u8, args: anytype) void {
+    reporter.print("error: " ++ fmt ++ "\n", args) catch {};
 }
 
-pub fn printUsageHint(command_name: []const u8) void {
-    std.debug.print("See '{s} --help' for more information.\n", .{command_name});
+pub fn printUsageHint(reporter: *std.Io.Writer, command_name: []const u8) void {
+    reporter.print("See '{s} --help' for more information.\n", .{command_name}) catch {};
 }
 
 pub fn levenshteinDistance(a: []const u8, b: []const u8) usize {

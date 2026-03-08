@@ -51,7 +51,7 @@ fn fieldIndex(comptime T: type, comptime name: []const u8) comptime_int {
     @compileError("field not found: " ++ name);
 }
 
-pub fn parseArgs(comptime T: type, argv: []const []const u8, allocator: std.mem.Allocator) ParseError!T {
+pub fn parseArgs(comptime T: type, argv: []const []const u8, allocator: std.mem.Allocator, reporter: *std.Io.Writer) ParseError!T {
     const arg_infos = comptime introspect_mod.introspect(T);
     const fields = @typeInfo(T).@"struct".fields;
 
@@ -77,14 +77,14 @@ pub fn parseArgs(comptime T: type, argv: []const []const u8, allocator: std.mem.
                 if (std.mem.eql(u8, name, "help")) return ParseError.HelpRequested;
 
                 const fi = findFieldByLong(arg_infos, name) orelse {
-                    reportUnknown(name, arg_infos);
+                    reportUnknown(reporter, name, arg_infos);
                     return ParseError.UnknownOption;
                 };
 
                 inline for (fields, 0..) |f, i| {
                     if (comptime arg_infos[i].kind != .positional) {
                         if (i == fi) {
-                            try setFlag(T, &result, f, &field_set, i, &tokenizer);
+                            try setFlag(T, &result, f, &field_set, i, &tokenizer, reporter);
                         }
                     }
                 }
@@ -93,14 +93,14 @@ pub fn parseArgs(comptime T: type, argv: []const []const u8, allocator: std.mem.
                 if (std.mem.eql(u8, opt.name, "help")) return ParseError.HelpRequested;
 
                 const fi = findFieldByLong(arg_infos, opt.name) orelse {
-                    reportUnknown(opt.name, arg_infos);
+                    reportUnknown(reporter, opt.name, arg_infos);
                     return ParseError.UnknownOption;
                 };
 
                 inline for (fields, 0..) |f, i| {
                     if (comptime arg_infos[i].kind != .positional) {
                         if (i == fi) {
-                            try setOption(T, &result, f, &field_set, i, opt.value);
+                            try setOption(T, &result, f, &field_set, i, opt.value, reporter);
                         }
                     }
                 }
@@ -110,21 +110,21 @@ pub fn parseArgs(comptime T: type, argv: []const []const u8, allocator: std.mem.
                     if (ch == 'h') return ParseError.HelpRequested;
 
                     const fi = findFieldByShort(arg_infos, ch) orelse {
-                        errors.printError("unknown option '-{c}'", .{ch});
+                        errors.printError(reporter, "unknown option '-{c}'", .{ch});
                         return ParseError.UnknownOption;
                     };
 
                     inline for (fields, 0..) |f, i| {
                         if (comptime arg_infos[i].kind != .positional) {
                             if (i == fi) {
-                                try handleShortFlag(T, &result, f, &field_set, i);
+                                try handleShortFlag(T, &result, f, &field_set, i, reporter);
                             }
                         }
                     }
                 }
             },
             .positional => |value| {
-                handlePositional(T, &result, &field_set, &positional_strings, &single_positional_index, value, allocator) catch |e| return e;
+                handlePositional(T, &result, &field_set, &positional_strings, &single_positional_index, value, allocator, reporter) catch |e| return e;
             },
             .terminator => {},
         }
@@ -137,7 +137,7 @@ pub fn parseArgs(comptime T: type, argv: []const []const u8, allocator: std.mem.
             var typed_values: std.ArrayList(core_type) = .{};
             for (positional_strings.items) |str| {
                 const parsed = parseValue(core_type, str) catch {
-                    errors.printError("invalid value '{s}' for argument <{s}>: expected {s}", .{ str, arg_infos[i].long_name, arg_infos[i].type_name });
+                    errors.printError(reporter, "invalid value '{s}' for argument <{s}>: expected {s}", .{ str, arg_infos[i].long_name, arg_infos[i].type_name });
                     return ParseError.InvalidValue;
                 };
                 typed_values.append(allocator, parsed) catch return ParseError.InvalidValue;
@@ -151,10 +151,10 @@ pub fn parseArgs(comptime T: type, argv: []const []const u8, allocator: std.mem.
     inline for (0..fields.len) |i| {
         if (arg_infos[i].required and !field_set[i]) {
             if (arg_infos[i].kind == .positional) {
-                errors.printError("missing required argument <{s}>", .{arg_infos[i].long_name});
+                errors.printError(reporter, "missing required argument <{s}>", .{arg_infos[i].long_name});
                 return ParseError.MissingRequiredArgument;
             } else {
-                errors.printError("missing required option '--{s}'", .{arg_infos[i].long_name});
+                errors.printError(reporter, "missing required option '--{s}'", .{arg_infos[i].long_name});
                 return ParseError.MissingRequiredOption;
             }
         }
@@ -189,7 +189,7 @@ fn findFieldByShort(arg_infos: []const ArgInfo, ch: u8) ?usize {
     return null;
 }
 
-fn reportUnknown(name: []const u8, arg_infos: []const ArgInfo) void {
+fn reportUnknown(reporter: *std.Io.Writer, name: []const u8, arg_infos: []const ArgInfo) void {
     var candidates: [64][]const u8 = undefined;
     var count: usize = 0;
     for (arg_infos) |ai| {
@@ -199,9 +199,9 @@ fn reportUnknown(name: []const u8, arg_infos: []const ArgInfo) void {
         }
     }
     if (errors.suggestClosest(name, candidates[0..count])) |suggestion| {
-        errors.printError("unknown option '--{s}', did you mean '--{s}'?", .{ name, suggestion });
+        errors.printError(reporter, "unknown option '--{s}', did you mean '--{s}'?", .{ name, suggestion });
     } else {
-        errors.printError("unknown option '--{s}'", .{name});
+        errors.printError(reporter, "unknown option '--{s}'", .{name});
     }
 }
 
@@ -212,6 +212,7 @@ fn setFlag(
     field_set: []bool,
     comptime i: usize,
     tokenizer: *Tokenizer,
+    reporter: *std.Io.Writer,
 ) ParseError!void {
     const opt_info = unwrapOptional(f.type);
     const inner = opt_info.child;
@@ -232,15 +233,15 @@ fn setFlag(
             const val_str = if (tokenizer.next()) |tok| switch (tok) {
                 .positional => |v| v,
                 else => {
-                    errors.printError("missing value for option '--{s}'", .{f.name});
+                    errors.printError(reporter,"missing value for option '--{s}'", .{f.name});
                     return ParseError.MissingOptionValue;
                 },
             } else {
-                errors.printError("missing value for option '--{s}'", .{f.name});
+                errors.printError(reporter,"missing value for option '--{s}'", .{f.name});
                 return ParseError.MissingOptionValue;
             };
             const val = parseValue(inner, val_str) catch {
-                errors.printError("invalid value '{s}' for option '--{s}': expected {s}", .{ val_str, f.name, "integer" });
+                errors.printError(reporter,"invalid value '{s}' for option '--{s}': expected {s}", .{ val_str, f.name, "integer" });
                 return ParseError.InvalidValue;
             };
             if (opt_info.is_optional) {
@@ -254,15 +255,15 @@ fn setFlag(
         const val_str = if (tokenizer.next()) |tok| switch (tok) {
             .positional => |v| v,
             else => {
-                errors.printError("missing value for option '--{s}'", .{f.name});
+                errors.printError(reporter,"missing value for option '--{s}'", .{f.name});
                 return ParseError.MissingOptionValue;
             },
         } else {
-            errors.printError("missing value for option '--{s}'", .{f.name});
+            errors.printError(reporter,"missing value for option '--{s}'", .{f.name});
             return ParseError.MissingOptionValue;
         };
         const val = parseValue(inner, val_str) catch {
-            errors.printError("invalid value '{s}' for option '--{s}'", .{ val_str, f.name });
+            errors.printError(reporter,"invalid value '{s}' for option '--{s}'", .{ val_str, f.name });
             return ParseError.InvalidValue;
         };
         if (opt_info.is_optional) {
@@ -281,11 +282,12 @@ fn setOption(
     field_set: []bool,
     comptime i: usize,
     value: []const u8,
+    reporter: *std.Io.Writer,
 ) ParseError!void {
     const opt_info = unwrapOptional(f.type);
     const inner = opt_info.child;
     const parsed = parseValue(inner, value) catch {
-        errors.printError("invalid value '{s}' for option '--{s}'", .{ value, f.name });
+        errors.printError(reporter,"invalid value '{s}' for option '--{s}'", .{ value, f.name });
         return ParseError.InvalidValue;
     };
     @field(result, f.name) = parsed;
@@ -298,6 +300,7 @@ fn handleShortFlag(
     comptime f: std.builtin.Type.StructField,
     field_set: []bool,
     comptime i: usize,
+    reporter: *std.Io.Writer,
 ) ParseError!void {
     const opt_info = unwrapOptional(f.type);
     const inner = opt_info.child;
@@ -309,7 +312,7 @@ fn handleShortFlag(
         @field(result, f.name) += 1;
         field_set[i] = true;
     } else {
-        errors.printError("short flag '-{c}' requires a value; use '--{s} <value>'", .{ f.name[0], f.name });
+        errors.printError(reporter,"short flag '-{c}' requires a value; use '--{s} <value>'", .{ f.name[0], f.name });
         return ParseError.MissingOptionValue;
     }
 }
@@ -322,6 +325,7 @@ fn handlePositional(
     single_positional_index: *usize,
     value: []const u8,
     allocator: std.mem.Allocator,
+    reporter: *std.Io.Writer,
 ) ParseError!void {
     const arg_infos = comptime introspect_mod.introspect(T);
     const fields = @typeInfo(T).@"struct".fields;
@@ -351,7 +355,7 @@ fn handlePositional(
                 const inner = opt_info.child;
                 const actual_type = if (isPositionalWrapper(inner)) inner.Inner else inner;
                 const parsed = parseValue(actual_type, value) catch {
-                    errors.printError("invalid value '{s}' for argument <{s}>", .{ value, arg_infos[i].long_name });
+                    errors.printError(reporter,"invalid value '{s}' for argument <{s}>", .{ value, arg_infos[i].long_name });
                     return ParseError.InvalidValue;
                 };
                 if (opt_info.is_optional) {
@@ -374,7 +378,7 @@ fn handlePositional(
         return;
     }
 
-    errors.printError("unexpected positional argument '{s}'", .{value});
+    errors.printError(reporter,"unexpected positional argument '{s}'", .{value});
     return ParseError.UnexpectedPositional;
 }
 
@@ -382,12 +386,18 @@ fn handlePositional(
 
 const testing = std.testing;
 
+fn testReporter(buf: []u8) std.Io.Writer {
+    return std.Io.Writer.fixed(buf);
+}
+
 test "parse simple flags" {
     const Cmd = struct {
         verbose: bool = false,
         hex_output: bool = false,
     };
-    const result = try parseArgs(Cmd, &.{ "--verbose", "--hex-output" }, testing.allocator);
+    var buf: [4096]u8 = undefined;
+    var reporter = testReporter(&buf);
+    const result = try parseArgs(Cmd, &.{ "--verbose", "--hex-output" }, testing.allocator, &reporter);
     try testing.expect(result.verbose);
     try testing.expect(result.hex_output);
 }
@@ -397,7 +407,9 @@ test "parse short flags combined" {
         verbose: bool = false,
         force: bool = false,
     };
-    const result = try parseArgs(Cmd, &.{"-vf"}, testing.allocator);
+    var buf: [4096]u8 = undefined;
+    var reporter = testReporter(&buf);
+    const result = try parseArgs(Cmd, &.{"-vf"}, testing.allocator, &reporter);
     try testing.expect(result.verbose);
     try testing.expect(result.force);
 }
@@ -406,7 +418,9 @@ test "parse option with value" {
     const Cmd = struct {
         port: u16 = 8080,
     };
-    const result = try parseArgs(Cmd, &.{ "--port", "3000" }, testing.allocator);
+    var buf: [4096]u8 = undefined;
+    var reporter = testReporter(&buf);
+    const result = try parseArgs(Cmd, &.{ "--port", "3000" }, testing.allocator, &reporter);
     try testing.expectEqual(@as(u16, 3000), result.port);
 }
 
@@ -414,7 +428,9 @@ test "parse option with equals" {
     const Cmd = struct {
         port: u16 = 8080,
     };
-    const result = try parseArgs(Cmd, &.{"--port=3000"}, testing.allocator);
+    var buf: [4096]u8 = undefined;
+    var reporter = testReporter(&buf);
+    const result = try parseArgs(Cmd, &.{"--port=3000"}, testing.allocator, &reporter);
     try testing.expectEqual(@as(u16, 3000), result.port);
 }
 
@@ -422,7 +438,9 @@ test "parse string option" {
     const Cmd = struct {
         output: []const u8,
     };
-    const result = try parseArgs(Cmd, &.{ "--output", "foo.txt" }, testing.allocator);
+    var buf: [4096]u8 = undefined;
+    var reporter = testReporter(&buf);
+    const result = try parseArgs(Cmd, &.{ "--output", "foo.txt" }, testing.allocator, &reporter);
     try testing.expectEqualStrings("foo.txt", result.output);
 }
 
@@ -431,7 +449,9 @@ test "parse enum option" {
     const Cmd = struct {
         mode: Mode = .fast,
     };
-    const result = try parseArgs(Cmd, &.{ "--mode", "slow" }, testing.allocator);
+    var buf: [4096]u8 = undefined;
+    var reporter = testReporter(&buf);
+    const result = try parseArgs(Cmd, &.{ "--mode", "slow" }, testing.allocator, &reporter);
     try testing.expectEqual(Mode.slow, result.mode);
 }
 
@@ -439,7 +459,9 @@ test "parse multi-positional" {
     const Cmd = struct {
         values: []const i64,
     };
-    const result = try parseArgs(Cmd, &.{ "1", "2", "3" }, testing.allocator);
+    var buf: [4096]u8 = undefined;
+    var reporter = testReporter(&buf);
+    const result = try parseArgs(Cmd, &.{ "1", "2", "3" }, testing.allocator, &reporter);
     defer testing.allocator.free(result.values);
     try testing.expectEqual(@as(usize, 3), result.values.len);
     try testing.expectEqual(@as(i64, 1), result.values[0]);
@@ -451,29 +473,40 @@ test "missing required option" {
     const Cmd = struct {
         output: []const u8,
     };
-    try testing.expectError(ParseError.MissingRequiredOption, parseArgs(Cmd, &.{}, testing.allocator));
+    var buf: [4096]u8 = undefined;
+    var reporter = testReporter(&buf);
+    try testing.expectError(ParseError.MissingRequiredOption, parseArgs(Cmd, &.{}, testing.allocator, &reporter));
+    try testing.expectEqualStrings("error: missing required option '--output'\n", reporter.buffered());
 }
 
 test "unknown option" {
     const Cmd = struct {
         verbose: bool = false,
     };
-    try testing.expectError(ParseError.UnknownOption, parseArgs(Cmd, &.{"--vrebose"}, testing.allocator));
+    var buf: [4096]u8 = undefined;
+    var reporter = testReporter(&buf);
+    try testing.expectError(ParseError.UnknownOption, parseArgs(Cmd, &.{"--vrebose"}, testing.allocator, &reporter));
+    try testing.expectEqualStrings("error: unknown option '--vrebose', did you mean '--verbose'?\n", reporter.buffered());
 }
 
 test "invalid value" {
     const Cmd = struct {
         port: u16 = 8080,
     };
-    try testing.expectError(ParseError.InvalidValue, parseArgs(Cmd, &.{ "--port", "abc" }, testing.allocator));
+    var buf: [4096]u8 = undefined;
+    var reporter = testReporter(&buf);
+    try testing.expectError(ParseError.InvalidValue, parseArgs(Cmd, &.{ "--port", "abc" }, testing.allocator, &reporter));
+    try testing.expectEqualStrings("error: invalid value 'abc' for option '--port': expected integer\n", reporter.buffered());
 }
 
 test "help requested" {
     const Cmd = struct {
         verbose: bool = false,
     };
-    try testing.expectError(ParseError.HelpRequested, parseArgs(Cmd, &.{"--help"}, testing.allocator));
-    try testing.expectError(ParseError.HelpRequested, parseArgs(Cmd, &.{"-h"}, testing.allocator));
+    var buf: [4096]u8 = undefined;
+    var reporter = testReporter(&buf);
+    try testing.expectError(ParseError.HelpRequested, parseArgs(Cmd, &.{"--help"}, testing.allocator, &reporter));
+    try testing.expectError(ParseError.HelpRequested, parseArgs(Cmd, &.{"-h"}, testing.allocator, &reporter));
 }
 
 test "terminator sends remaining to positionals" {
@@ -481,7 +514,9 @@ test "terminator sends remaining to positionals" {
         verbose: bool = false,
         values: []const i64,
     };
-    const result = try parseArgs(Cmd, &.{ "--verbose", "--", "1", "2" }, testing.allocator);
+    var buf: [4096]u8 = undefined;
+    var reporter = testReporter(&buf);
+    const result = try parseArgs(Cmd, &.{ "--verbose", "--", "1", "2" }, testing.allocator, &reporter);
     defer testing.allocator.free(result.values);
     try testing.expect(result.verbose);
     try testing.expectEqual(@as(usize, 2), result.values.len);
@@ -491,7 +526,9 @@ test "counted flag" {
     const Cmd = struct {
         count: u8 = 0,
     };
-    const result = try parseArgs(Cmd, &.{ "-c", "-c", "-c" }, testing.allocator);
+    var buf: [4096]u8 = undefined;
+    var reporter = testReporter(&buf);
+    const result = try parseArgs(Cmd, &.{ "-c", "-c", "-c" }, testing.allocator, &reporter);
     try testing.expectEqual(@as(u8, 3), result.count);
 }
 
@@ -499,9 +536,11 @@ test "optional option" {
     const Cmd = struct {
         output: ?[]const u8 = null,
     };
-    const result = try parseArgs(Cmd, &.{}, testing.allocator);
+    var buf: [4096]u8 = undefined;
+    var reporter = testReporter(&buf);
+    const result = try parseArgs(Cmd, &.{}, testing.allocator, &reporter);
     try testing.expect(result.output == null);
 
-    const result2 = try parseArgs(Cmd, &.{ "--output", "foo" }, testing.allocator);
+    const result2 = try parseArgs(Cmd, &.{ "--output", "foo" }, testing.allocator, &reporter);
     try testing.expectEqualStrings("foo", result2.output.?);
 }

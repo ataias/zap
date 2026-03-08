@@ -21,14 +21,17 @@ pub fn Positional(comptime T: type) type {
     };
 }
 
-pub fn parseFromSlice(comptime T: type, argv: []const []const u8, allocator: std.mem.Allocator) errors.ParseError!T {
-    return parser.parseArgs(T, argv, allocator);
+pub fn parseFromSlice(comptime T: type, argv: []const []const u8, allocator: std.mem.Allocator, reporter: *std.Io.Writer) errors.ParseError!T {
+    return parser.parseArgs(T, argv, allocator, reporter);
 }
 
 pub fn run(comptime T: type, init: std.process.Init) !void {
     const allocator = init.arena.allocator();
     const argv_slice = try init.minimal.args.toSlice(allocator);
     const argv: []const []const u8 = if (argv_slice.len > 0) argv_slice[1..] else argv_slice;
+
+    var err_buf: [4096]u8 = undefined;
+    var err_writer = std.Io.File.stderr().writer(init.io, &err_buf);
 
     if (@hasDecl(T, "meta") and T.meta.subcommands.len > 0) {
         if (argv.len > 0) {
@@ -40,42 +43,45 @@ pub fn run(comptime T: type, init: std.process.Init) !void {
 
             inline for (T.meta.subcommands) |Sub| {
                 if (std.mem.eql(u8, first, comptime help.subcommandName(Sub))) {
-                    return runSubcommand(Sub, argv[1..], init);
+                    return runSubcommand(Sub, argv[1..], init, &err_writer.interface);
                 }
             }
 
-            errors.printError("unknown subcommand '{s}'", .{first});
-            errors.printUsageHint(comptime commandName(T));
+            errors.printError(&err_writer.interface, "unknown subcommand '{s}'", .{first});
+            errors.printUsageHint(&err_writer.interface, comptime commandName(T));
+            err_writer.interface.flush() catch {};
             std.process.exit(1);
         }
 
         if (@hasDecl(T, "run")) {
-            const instance = parseOrExit(T, argv, init);
+            const instance = parseOrExit(T, argv, init, &err_writer.interface);
             return instance.run(init);
         }
 
         printHelpAndExit(T, init.io);
     }
 
-    const instance = parseOrExit(T, argv, init);
+    const instance = parseOrExit(T, argv, init, &err_writer.interface);
     return instance.run(init);
 }
 
-fn parseOrExit(comptime T: type, argv: []const []const u8, init: std.process.Init) T {
-    return parseFromSlice(T, argv, init.arena.allocator()) catch |err| switch (err) {
+fn parseOrExit(comptime T: type, argv: []const []const u8, init: std.process.Init, reporter: *std.Io.Writer) T {
+    return parseFromSlice(T, argv, init.arena.allocator(), reporter) catch |err| switch (err) {
         error.HelpRequested => printHelpAndExit(T, init.io),
         else => {
-            errors.printUsageHint(comptime commandName(T));
+            errors.printUsageHint(reporter, comptime commandName(T));
+            reporter.flush() catch {};
             std.process.exit(1);
         },
     };
 }
 
-fn runSubcommand(comptime Sub: type, argv: []const []const u8, init: std.process.Init) !void {
-    const instance = parseFromSlice(Sub, argv, init.arena.allocator()) catch |err| switch (err) {
+fn runSubcommand(comptime Sub: type, argv: []const []const u8, init: std.process.Init, reporter: *std.Io.Writer) !void {
+    const instance = parseFromSlice(Sub, argv, init.arena.allocator(), reporter) catch |err| switch (err) {
         error.HelpRequested => printHelpAndExit(Sub, init.io),
         else => {
-            errors.printUsageHint(comptime help.subcommandName(Sub));
+            errors.printUsageHint(reporter, comptime help.subcommandName(Sub));
+            reporter.flush() catch {};
             std.process.exit(1);
         },
     };
