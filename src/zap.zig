@@ -26,6 +26,12 @@ pub fn parseFromSlice(comptime T: type, argv: []const []const u8, allocator: std
 }
 
 pub fn run(comptime T: type, init: std.process.Init) !void {
+    comptime {
+        const has_subcommands = @hasDecl(T, "meta") and @hasField(@TypeOf(T.meta), "subcommands") and T.meta.subcommands.len > 0;
+        if (!has_subcommands and !@hasDecl(T, "run")) {
+            @compileError("command type '" ++ @typeName(T) ++ "' must have a pub fn run() or subcommands");
+        }
+    }
     const allocator = init.arena.allocator();
     const argv_slice = try init.minimal.args.toSlice(allocator);
     const argv: []const []const u8 = if (argv_slice.len > 0) argv_slice[1..] else argv_slice;

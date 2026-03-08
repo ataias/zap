@@ -4,6 +4,7 @@ const Tokenizer = @import("tokenizer.zig").Tokenizer;
 const Token = @import("tokenizer.zig").Token;
 const ArgInfo = introspect_mod.ArgInfo;
 const ArgKind = introspect_mod.ArgKind;
+const zap = @import("zap.zig");
 const errors = @import("errors.zig");
 const ParseError = errors.ParseError;
 
@@ -350,24 +351,25 @@ fn handlePositional(
         single_positional_index.* += 1;
 
         inline for (fields, 0..) |f, i| {
-            if (i == target_i) {
-                const opt_info = unwrapOptional(f.type);
+            if (comptime arg_infos[i].kind == .positional and !arg_infos[i].is_multi) {
+                const opt_info = comptime unwrapOptional(f.type);
                 const inner = opt_info.child;
-                const actual_type = if (isPositionalWrapper(inner)) inner.Inner else inner;
-                const parsed = parseValue(actual_type, value) catch {
-                    errors.printError(reporter,"invalid value '{s}' for argument <{s}>", .{ value, arg_infos[i].long_name });
-                    return ParseError.InvalidValue;
-                };
-                if (opt_info.is_optional) {
-                    @field(result, f.name) = parsed;
-                } else {
-                    if (isPositionalWrapper(inner)) {
+                const is_wrap = comptime isPositionalWrapper(inner);
+                const actual_type = if (is_wrap) inner.Inner else inner;
+                if (i == target_i) {
+                    const parsed = parseValue(actual_type, value) catch {
+                        errors.printError(reporter, "invalid value '{s}' for argument <{s}>", .{ value, arg_infos[i].long_name });
+                        return ParseError.InvalidValue;
+                    };
+                    if (opt_info.is_optional) {
+                        @field(result, f.name) = parsed;
+                    } else if (is_wrap) {
                         @field(result, f.name) = .{ .value = parsed };
                     } else {
                         @field(result, f.name) = parsed;
                     }
+                    field_set[i] = true;
                 }
-                field_set[i] = true;
             }
         }
         return;
@@ -530,6 +532,36 @@ test "counted flag" {
     var reporter = testReporter(&buf);
     const result = try parseArgs(Cmd, &.{ "-c", "-c", "-c" }, testing.allocator, &reporter);
     try testing.expectEqual(@as(u8, 3), result.count);
+}
+
+test "missing required argument" {
+    const Cmd = struct {
+        name: zap.Positional([]const u8),
+    };
+    var buf: [4096]u8 = undefined;
+    var reporter = testReporter(&buf);
+    try testing.expectError(ParseError.MissingRequiredArgument, parseArgs(Cmd, &.{}, testing.allocator, &reporter));
+    try testing.expectEqualStrings("error: missing required argument <name>\n", reporter.buffered());
+}
+
+test "unexpected positional" {
+    const Cmd = struct {
+        verbose: bool = false,
+    };
+    var buf: [4096]u8 = undefined;
+    var reporter = testReporter(&buf);
+    try testing.expectError(ParseError.UnexpectedPositional, parseArgs(Cmd, &.{"foo"}, testing.allocator, &reporter));
+    try testing.expectEqualStrings("error: unexpected positional argument 'foo'\n", reporter.buffered());
+}
+
+test "missing option value" {
+    const Cmd = struct {
+        output: []const u8,
+    };
+    var buf: [4096]u8 = undefined;
+    var reporter = testReporter(&buf);
+    try testing.expectError(ParseError.MissingOptionValue, parseArgs(Cmd, &.{"--output"}, testing.allocator, &reporter));
+    try testing.expectEqualStrings("error: missing value for option '--output'\n", reporter.buffered());
 }
 
 test "optional option" {
