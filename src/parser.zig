@@ -234,15 +234,15 @@ fn setFlag(
             const val_str = if (tokenizer.next()) |tok| switch (tok) {
                 .positional => |v| v,
                 else => {
-                    errors.printError(reporter,"missing value for option '--{s}'", .{f.name});
+                    errors.printError(reporter, "missing value for option '--{s}'", .{f.name});
                     return ParseError.MissingOptionValue;
                 },
             } else {
-                errors.printError(reporter,"missing value for option '--{s}'", .{f.name});
+                errors.printError(reporter, "missing value for option '--{s}'", .{f.name});
                 return ParseError.MissingOptionValue;
             };
             const val = parseValue(inner, val_str) catch {
-                errors.printError(reporter,"invalid value '{s}' for option '--{s}': expected {s}", .{ val_str, f.name, "integer" });
+                errors.printError(reporter, "invalid value '{s}' for option '--{s}': expected {s}", .{ val_str, f.name, "integer" });
                 return ParseError.InvalidValue;
             };
             if (opt_info.is_optional) {
@@ -256,15 +256,15 @@ fn setFlag(
         const val_str = if (tokenizer.next()) |tok| switch (tok) {
             .positional => |v| v,
             else => {
-                errors.printError(reporter,"missing value for option '--{s}'", .{f.name});
+                errors.printError(reporter, "missing value for option '--{s}'", .{f.name});
                 return ParseError.MissingOptionValue;
             },
         } else {
-            errors.printError(reporter,"missing value for option '--{s}'", .{f.name});
+            errors.printError(reporter, "missing value for option '--{s}'", .{f.name});
             return ParseError.MissingOptionValue;
         };
         const val = parseValue(inner, val_str) catch {
-            errors.printError(reporter,"invalid value '{s}' for option '--{s}'", .{ val_str, f.name });
+            errors.printError(reporter, "invalid value '{s}' for option '--{s}'", .{ val_str, f.name });
             return ParseError.InvalidValue;
         };
         if (opt_info.is_optional) {
@@ -288,7 +288,7 @@ fn setOption(
     const opt_info = unwrapOptional(f.type);
     const inner = opt_info.child;
     const parsed = parseValue(inner, value) catch {
-        errors.printError(reporter,"invalid value '{s}' for option '--{s}'", .{ value, f.name });
+        errors.printError(reporter, "invalid value '{s}' for option '--{s}'", .{ value, f.name });
         return ParseError.InvalidValue;
     };
     @field(result, f.name) = parsed;
@@ -313,7 +313,7 @@ fn handleShortFlag(
         @field(result, f.name) += 1;
         field_set[i] = true;
     } else {
-        errors.printError(reporter,"short flag '-{c}' requires a value; use '--{s} <value>'", .{ f.name[0], f.name });
+        errors.printError(reporter, "short flag '-{c}' requires a value; use '--{s} <value>'", .{ f.name[0], f.name });
         return ParseError.MissingOptionValue;
     }
 }
@@ -380,7 +380,7 @@ fn handlePositional(
         return;
     }
 
-    errors.printError(reporter,"unexpected positional argument '{s}'", .{value});
+    errors.printError(reporter, "unexpected positional argument '{s}'", .{value});
     return ParseError.UnexpectedPositional;
 }
 
