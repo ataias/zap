@@ -3,7 +3,11 @@ const introspect_mod = @import("../introspect.zig");
 const help_mod = @import("../help.zig");
 const ArgInfo = introspect_mod.ArgInfo;
 const ArgKind = introspect_mod.ArgKind;
-const CompletionHint = @import("../complete.zig").CompletionHint;
+const complete_mod = @import("../complete.zig");
+const CompletionHint = complete_mod.CompletionHint;
+const getCompletionHint = complete_mod.getCompletionHint;
+const getFieldDescription = complete_mod.getFieldDescription;
+const isHiddenComptime = complete_mod.isHiddenComptime;
 
 pub fn generate(
     writer: *std.Io.Writer,
@@ -76,6 +80,9 @@ fn writeCommand(
                 if (condition) |cond| {
                     try writer.print(" -n '{s}'", .{cond});
                 }
+                if (comptime hint != .file_path) {
+                    try writer.writeAll(" -f");
+                }
                 if (comptime hint != .none) {
                     try writeCompletionHint(writer, hint);
                 } else if (ai.enum_values) |vals| {
@@ -87,8 +94,23 @@ fn writeCommand(
         }
 
         try writer.print("complete -c {s}", .{cmd_name});
-        if (condition) |cond| {
-            try writer.print(" -n '{s}'", .{cond});
+        // Hide bool flags after first use; counted flags stay repeatable.
+        // Options (.option) are excluded: the condition would also block
+        // their value completions (-a), breaking e.g. `--format <TAB>`.
+        if (ai.kind == .flag) {
+            if (condition) |cond| {
+                try writer.print(" -n '{s}; and not __fish_contains_opt", .{cond});
+            } else {
+                try writer.writeAll(" -n 'not __fish_contains_opt");
+            }
+            if (ai.short_name) |s| {
+                try writer.print(" {c}", .{s});
+            }
+            try writer.print(" {s}'", .{ai.long_name});
+        } else {
+            if (condition) |cond| {
+                try writer.print(" -n '{s}'", .{cond});
+            }
         }
 
         if (ai.short_name) |s| {
@@ -98,10 +120,13 @@ fn writeCommand(
 
         switch (ai.kind) {
             .flag => try writer.writeAll(" -f"),
-            .counted_flag => {},
+            .counted_flag => try writer.writeAll(" -f"),
             .option => {
                 try writer.writeAll(" -r");
                 const hint = comptime getCompletionHint(Command, ai.field_name);
+                if (comptime hint != .file_path) {
+                    try writer.writeAll(" -f");
+                }
                 if (comptime hint != .none) {
                     try writeCompletionHint(writer, hint);
                 } else if (ai.enum_values) |vals| {
@@ -136,12 +161,12 @@ fn writeCompletionHint(writer: *std.Io.Writer, hint: CompletionHint) !void {
         .none => {},
         .file_path => try writer.writeAll(" -F"),
         .file_path_with_extensions => |exts| {
-            try writer.writeAll(" -a '(__fish_complete_suffix");
+            try writer.writeAll(" -a '(set -l tok (commandline -ct); for f in");
             for (exts) |ext| {
-                try writer.writeAll(" .");
+                try writer.writeAll(" $tok*.");
                 try writeFishEscaped(writer, ext);
             }
-            try writer.writeAll(")'");
+            try writer.writeAll(" $tok*/; test -e \"$f\"; and echo $f; end)'");
         },
         .dir_path => try writer.writeAll(" -a '(__fish_complete_directories)'"),
         .executable => try writer.writeAll(" -a '(__fish_complete_command)'"),
@@ -162,66 +187,6 @@ fn writeFishEscaped(writer: *std.Io.Writer, s: []const u8) !void {
             try writer.writeByte(c);
         }
     }
-}
-
-fn getCompletionHint(comptime Command: type, comptime field_name: []const u8) CompletionHint {
-    if (@hasDecl(Command, "meta") and @hasField(@TypeOf(Command.meta), "field_completions")) {
-        const completions = Command.meta.field_completions;
-        inline for (@typeInfo(@TypeOf(completions)).@"struct".fields) |f| {
-            if (std.mem.eql(u8, f.name, field_name)) {
-                return coerceToCompletionHint(@field(completions, f.name));
-            }
-        }
-    }
-    return .none;
-}
-
-fn coerceToCompletionHint(val: anytype) CompletionHint {
-    const T = @TypeOf(val);
-    if (T == CompletionHint) return val;
-
-    if (@typeInfo(T) == .@"struct") {
-        const fields = @typeInfo(T).@"struct".fields;
-        if (fields.len == 1) {
-            const name = fields[0].name;
-            if (std.mem.eql(u8, name, "values"))
-                return .{ .values = val.values };
-            if (std.mem.eql(u8, name, "from_command"))
-                return .{ .from_command = val.from_command };
-            if (std.mem.eql(u8, name, "file_path_with_extensions"))
-                return .{ .file_path_with_extensions = val.file_path_with_extensions };
-        }
-        @compileError("unrecognized completion hint struct");
-    }
-
-    // Enum literals (.none, .file_path, .dir_path, .executable)
-    return val;
-}
-
-fn getFieldDescription(comptime Command: type, comptime field_name: []const u8) ?[]const u8 {
-    if (@hasDecl(Command, "meta") and @hasField(@TypeOf(Command.meta), "field_descriptions")) {
-        const descs = Command.meta.field_descriptions;
-        inline for (@typeInfo(@TypeOf(descs)).@"struct".fields) |f| {
-            if (std.mem.eql(u8, f.name, field_name)) {
-                return @field(descs, f.name);
-            }
-        }
-    }
-    return null;
-}
-
-fn isHidden(hidden: []const []const u8, name: []const u8) bool {
-    for (hidden) |h| {
-        if (std.mem.eql(u8, h, name)) return true;
-    }
-    return false;
-}
-
-fn isHiddenComptime(comptime hidden: []const []const u8, comptime name: []const u8) bool {
-    for (hidden) |h| {
-        if (std.mem.eql(u8, h, name)) return true;
-    }
-    return false;
 }
 
 // --- Tests ---
@@ -251,9 +216,9 @@ test "fish: simple command with flags and options" {
 
     try testing.expectEqualStrings(
         \\complete -c test-cmd -s h -l help -f -d 'Show help information'
-        \\complete -c test-cmd -s v -l verbose -f -d 'Enable verbose output'
-        \\complete -c test-cmd -s o -l output -r -d 'Output path'
-        \\complete -c test-cmd -s p -l port -r
+        \\complete -c test-cmd -n 'not __fish_contains_opt v verbose' -s v -l verbose -f -d 'Enable verbose output'
+        \\complete -c test-cmd -s o -l output -r -f -d 'Output path'
+        \\complete -c test-cmd -s p -l port -r -f
         \\
     , writer.buffered());
 }
@@ -285,9 +250,9 @@ test "fish: command with subcommands" {
         \\complete -c mycli -n '__fish_use_subcommand' -f -a add -d 'Add items'
         \\complete -c mycli -n '__fish_use_subcommand' -f -a remove -d 'Remove items'
         \\complete -c mycli -n '__fish_seen_subcommand_from add' -s h -l help -f -d 'Show help information'
-        \\complete -c mycli -n '__fish_seen_subcommand_from add' -s v -l verbose -f
+        \\complete -c mycli -n '__fish_seen_subcommand_from add; and not __fish_contains_opt v verbose' -s v -l verbose -f
         \\complete -c mycli -n '__fish_seen_subcommand_from remove' -s h -l help -f -d 'Show help information'
-        \\complete -c mycli -n '__fish_seen_subcommand_from remove' -s f -l force -f
+        \\complete -c mycli -n '__fish_seen_subcommand_from remove; and not __fish_contains_opt f force' -s f -l force -f
         \\
     , writer.buffered());
 }
@@ -304,7 +269,7 @@ test "fish: enum options auto-complete variant names" {
 
     try testing.expectEqualStrings(
         \\complete -c tool -s h -l help -f -d 'Show help information'
-        \\complete -c tool -s f -l format -r -a 'json yaml text'
+        \\complete -c tool -s f -l format -r -f -a 'json yaml text'
         \\
     , writer.buffered());
 }
@@ -346,7 +311,7 @@ test "fish: completion hint file_path_with_extensions" {
 
     try testing.expectEqualStrings(
         \\complete -c tool -s h -l help -f -d 'Show help information'
-        \\complete -c tool -s c -l config -r -a '(__fish_complete_suffix .json .yaml)'
+        \\complete -c tool -s c -l config -r -f -a '(set -l tok (commandline -ct); for f in $tok*.json $tok*.yaml $tok*/; test -e "$f"; and echo $f; end)'
         \\
     , writer.buffered());
 }
@@ -367,7 +332,7 @@ test "fish: completion hint dir_path" {
 
     try testing.expectEqualStrings(
         \\complete -c tool -s h -l help -f -d 'Show help information'
-        \\complete -c tool -s o -l output -r -a '(__fish_complete_directories)'
+        \\complete -c tool -s o -l output -r -f -a '(__fish_complete_directories)'
         \\
     , writer.buffered());
 }
@@ -388,7 +353,7 @@ test "fish: completion hint values" {
 
     try testing.expectEqualStrings(
         \\complete -c tool -s h -l help -f -d 'Show help information'
-        \\complete -c tool -s c -l color -r -a 'red green blue'
+        \\complete -c tool -s c -l color -r -f -a 'red green blue'
         \\
     , writer.buffered());
 }
@@ -409,7 +374,7 @@ test "fish: completion hint from_command" {
 
     try testing.expectEqualStrings(
         \\complete -c tool -s h -l help -f -d 'Show help information'
-        \\complete -c tool -s n -l name -r -a '(docker ps --format '\''{{.Names}}'\'')'
+        \\complete -c tool -s n -l name -r -f -a '(docker ps --format '\''{{.Names}}'\'')'
         \\
     , writer.buffered());
 }
@@ -430,7 +395,7 @@ test "fish: completion hint executable" {
 
     try testing.expectEqualStrings(
         \\complete -c tool -s h -l help -f -d 'Show help information'
-        \\complete -c tool -s s -l shell -r -a '(__fish_complete_command)'
+        \\complete -c tool -s s -l shell -r -f -a '(__fish_complete_command)'
         \\
     , writer.buffered());
 }
@@ -451,7 +416,7 @@ test "fish: single-quote escaping in values" {
 
     try testing.expectEqualStrings(
         \\complete -c tool -s h -l help -f -d 'Show help information'
-        \\complete -c tool -s n -l name -r -a 'foo it'\''s bar'
+        \\complete -c tool -s n -l name -r -f -a 'foo it'\''s bar'
         \\
     , writer.buffered());
 }
@@ -472,7 +437,7 @@ test "fish: positional with completion hint" {
 
     try testing.expectEqualStrings(
         \\complete -c tool -s h -l help -f -d 'Show help information'
-        \\complete -c tool -a '(__fish_complete_directories)'
+        \\complete -c tool -f -a '(__fish_complete_directories)'
         \\
     , writer.buffered());
 }
@@ -489,7 +454,7 @@ test "fish: positional with enum type" {
 
     try testing.expectEqualStrings(
         \\complete -c tool -s h -l help -f -d 'Show help information'
-        \\complete -c tool -a 'red green blue'
+        \\complete -c tool -f -a 'red green blue'
         \\
     , writer.buffered());
 }
@@ -507,7 +472,7 @@ test "fish: --help always present" {
     try testing.expect(std.mem.indexOf(u8, output, "-s h -l help -f -d 'Show help information'") != null);
 }
 
-test "fish: counted flags can repeat (no -f)" {
+test "fish: counted flags can repeat" {
     const Cmd = struct {
         verbosity: u8 = 0,
     };
@@ -518,7 +483,7 @@ test "fish: counted flags can repeat (no -f)" {
 
     try testing.expectEqualStrings(
         \\complete -c tool -s h -l help -f -d 'Show help information'
-        \\complete -c tool -s v -l verbosity
+        \\complete -c tool -s v -l verbosity -f
         \\
     , writer.buffered());
 }
@@ -606,7 +571,7 @@ test "fish: description with single quote is escaped" {
 
     try testing.expectEqualStrings(
         \\complete -c tool -s h -l help -f -d 'Show help information'
-        \\complete -c tool -s n -l name -r -d 'it'\''s a name'
+        \\complete -c tool -s n -l name -r -f -d 'it'\''s a name'
         \\
     , writer.buffered());
 }
@@ -628,7 +593,7 @@ test "fish: completion hint overrides enum auto-completion" {
 
     try testing.expectEqualStrings(
         \\complete -c tool -s h -l help -f -d 'Show help information'
-        \\complete -c tool -s f -l format -r -a 'custom1 custom2'
+        \\complete -c tool -s f -l format -r -f -a 'custom1 custom2'
         \\
     , writer.buffered());
 }

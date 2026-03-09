@@ -1,0 +1,139 @@
+#!/usr/bin/expect -f
+# Universal shell completion helper
+# Usage: expect complete.expect <shell> <binary> <cmdline> [workdir]
+# Spawns the given shell, loads completions, types cmdline + TAB,
+# and outputs the raw terminal content.
+# If workdir is provided, cd into it before querying completions.
+
+set timeout 5
+set shell_type [lindex $argv 0]
+set binary [lindex $argv 1]
+set cmdline [lindex $argv 2]
+set workdir [lindex $argv 3]
+
+log_user 0
+
+set cmd_name [file tail $binary]
+set bin_dir [file dirname $binary]
+
+switch $shell_type {
+    fish {
+        spawn fish --no-config
+        expect -re "> |\\$ "
+
+        # Source completions via temp file (psub is unreliable in expect)
+        send "set tmpf (mktemp)\r"
+        expect -re "> |\\$ "
+        send "$binary --generate-completion-script fish > \$tmpf\r"
+        expect -re "> |\\$ "
+        send "source \$tmpf; and rm \$tmpf\r"
+        expect -re "> |\\$ "
+
+        if {$workdir ne ""} {
+            send "cd $workdir\r"
+            expect -re "> |\\$ "
+        }
+
+        send "echo __START__; complete -C '$cmdline'; echo __END__\r"
+
+        set output ""
+        expect {
+            -re "__START__\r?\n(.*?)__END__" {
+                set output $expect_out(1,string)
+            }
+            timeout {}
+        }
+        send "exit\r"
+        expect eof
+        puts $output
+    }
+    bash {
+        spawn bash --norc --noprofile
+        expect "$ "
+
+        # Source the completion script via temp file
+        send "tmpf=\$(mktemp)\r"
+        expect "$ "
+        send "$binary --generate-completion-script bash > \$tmpf\r"
+        expect "$ "
+        send "source \$tmpf && rm -f \$tmpf\r"
+        expect "$ "
+
+        if {$workdir ne ""} {
+            send "cd $workdir\r"
+            expect "$ "
+        }
+
+        # Simulate completion by setting COMP_WORDS and calling the function.
+        # If cmdline ends with a space, append "" to represent a new empty word.
+        # Otherwise, the last word in cmdline is the word being completed.
+        if {[string index $cmdline end] eq " "} {
+            send "COMP_WORDS=($cmdline\"\")\r"
+        } else {
+            send "COMP_WORDS=($cmdline)\r"
+        }
+        expect "$ "
+        send "COMP_CWORD=\$((\${#COMP_WORDS\[@\]} - 1))\r"
+        expect "$ "
+        send "COMPREPLY=()\r"
+        expect "$ "
+
+        set func_name [string map {- _} $cmd_name]
+        send "_$func_name\r"
+        expect "$ "
+
+        # Print results with markers so we can extract them
+        send "echo __START__; printf '%s\\n' \"\${COMPREPLY\[@\]}\"; echo __END__\r"
+
+        set output ""
+        expect {
+            -re "__START__\r?\n(.*?)__END__" {
+                set output $expect_out(1,string)
+            }
+            timeout {}
+        }
+        send "exit\r"
+        expect eof
+        puts $output
+    }
+    zsh {
+        spawn zsh -f
+        expect "% "
+
+        send "autoload -Uz compinit && compinit -u 2>/dev/null\r"
+        expect "% "
+
+        send "export PATH=\"$bin_dir:\$PATH\"\r"
+        expect "% "
+
+        send "tmpf=\$(mktemp)\r"
+        expect "% "
+        send "$binary --generate-completion-script zsh > \$tmpf\r"
+        expect "% "
+        send "source \$tmpf && rm -f \$tmpf\r"
+        expect "% "
+
+        if {$workdir ne ""} {
+            send "cd $workdir\r"
+            expect "% "
+        }
+
+        # Type command and press tab
+        send "$cmdline\t"
+        sleep 1
+
+        set output ""
+        expect {
+            -re ".+" {
+                append output $expect_out(0,string)
+                exp_continue
+            }
+            timeout {}
+        }
+
+        send "\x03"
+        send "exit\r"
+        expect eof
+        puts $output
+    }
+}

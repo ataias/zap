@@ -59,8 +59,12 @@ pub fn build(b: *std.Build) void {
         "test-shell-completions",
         "Run shell completion tests",
     );
-    const fish_test = b.addSystemCommand(&.{"fish"});
-    fish_test.addFileArg(b.path("tests/completions/test_fish.fish"));
-    fish_test.addArtifactArg(shell_completion_exe);
-    test_shell_completions_step.dependOn(&fish_test.step);
+    const test_script = b.path("tests/completions/test_completions.sh");
+    for ([_][]const u8{ "fish", "bash", "zsh" }) |shell| {
+        const run = b.addSystemCommand(&.{"bash"});
+        run.addFileArg(test_script);
+        run.addArtifactArg(shell_completion_exe);
+        run.addArg(shell);
+        test_shell_completions_step.dependOn(&run.step);
+    }
 }

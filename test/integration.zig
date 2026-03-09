@@ -66,6 +66,18 @@ fn addExampleTests(
         run.expectStdOutMatch("complete -c add");
         step.dependOn(&run.step);
     }
+    {
+        const run = b.addRunArtifact(add_exe);
+        run.addArgs(&.{ "--generate-completion-script", "zsh" });
+        run.expectStdOutMatch("#compdef add");
+        step.dependOn(&run.step);
+    }
+    {
+        const run = b.addRunArtifact(add_exe);
+        run.addArgs(&.{ "--generate-completion-script", "bash" });
+        run.expectStdOutMatch("complete -F");
+        step.dependOn(&run.step);
+    }
 }
 
 fn addMathTests(
@@ -116,6 +128,18 @@ fn addMathTests(
         const run = b.addRunArtifact(math_exe);
         run.addArgs(&.{ "--generate-completion-script", "fish" });
         run.expectStdOutMatch("complete -c math");
+        step.dependOn(&run.step);
+    }
+    {
+        const run = b.addRunArtifact(math_exe);
+        run.addArgs(&.{ "--generate-completion-script", "zsh" });
+        run.expectStdOutMatch("#compdef math");
+        step.dependOn(&run.step);
+    }
+    {
+        const run = b.addRunArtifact(math_exe);
+        run.addArgs(&.{ "--generate-completion-script", "bash" });
+        run.expectStdOutMatch("complete -F");
         step.dependOn(&run.step);
     }
 }
@@ -194,6 +218,41 @@ fn addShellCompletionTests(
         run.addArgs(&.{ "--generate-completion-script", "invalid" });
         run.expectStdErrMatch("unknown shell");
         run.expectExitCode(1);
+        step.dependOn(&run.step);
+    }
+    // --generate-completion-script zsh exits 0 with completion output
+    {
+        const run = b.addRunArtifact(exe);
+        run.addArgs(&.{ "--generate-completion-script", "zsh" });
+        run.expectStdOutMatch("#compdef");
+        step.dependOn(&run.step);
+    }
+    // --generate-completion-script bash exits 0 with completion output
+    {
+        const run = b.addRunArtifact(exe);
+        run.addArgs(&.{ "--generate-completion-script", "bash" });
+        run.expectStdOutMatch("complete -F");
+        step.dependOn(&run.step);
+    }
+    // from_command hint appears in generated fish completions
+    {
+        const run = b.addRunArtifact(exe);
+        run.addArgs(&.{ "--generate-completion-script", "fish" });
+        run.expectStdOutMatch("echo web api worker");
+        step.dependOn(&run.step);
+    }
+    // from_command hint appears in generated bash completions
+    {
+        const run = b.addRunArtifact(exe);
+        run.addArgs(&.{ "--generate-completion-script", "bash" });
+        run.expectStdOutMatch("echo web api worker");
+        step.dependOn(&run.step);
+    }
+    // from_command hint appears in generated zsh completions
+    {
+        const run = b.addRunArtifact(exe);
+        run.addArgs(&.{ "--generate-completion-script", "zsh" });
+        run.expectStdOutMatch("echo web api worker");
         step.dependOn(&run.step);
     }
 }

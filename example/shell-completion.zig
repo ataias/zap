@@ -13,9 +13,13 @@ const Deploy = struct {
             .port = "Port to listen on",
             .verbose = "Enable verbose output",
             .count = "Repeat count",
+            .service = "Service name",
+            .config = "Config file path",
         },
         .field_completions = .{
             .target = .{ .values = &.{ "prod", "staging", "dev" } },
+            .service = .{ .from_command = "echo web api worker" },
+            .config = .{ .file_path_with_extensions = &.{ "json", "yaml" } },
         },
     };
 
@@ -24,6 +28,8 @@ const Deploy = struct {
     port: u16 = 8080,
     verbose: bool = false,
     count: u8 = 0,
+    service: []const u8 = "web",
+    config: []const u8 = "config.json",
     debug_trace: bool = false,
 
     pub fn run(self: @This(), init: std.process.Init) !void {
