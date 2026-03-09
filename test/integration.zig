@@ -118,6 +118,20 @@ fn addMathTests(
     }
     {
         const run = b.addRunArtifact(math_exe);
+        run.addArgs(&.{"ad"});
+        run.expectStdErrMatch("unknown subcommand 'ad', did you mean 'add'?");
+        run.expectExitCode(1);
+        step.dependOn(&run.step);
+    }
+    {
+        const run = b.addRunArtifact(math_exe);
+        run.addArgs(&.{"mlutiply"});
+        run.expectStdErrMatch("unknown subcommand 'mlutiply', did you mean 'multiply'?");
+        run.expectExitCode(1);
+        step.dependOn(&run.step);
+    }
+    {
+        const run = b.addRunArtifact(math_exe);
         run.addArgs(&.{"add"});
         run.expectStdErrMatch("missing required argument");
         run.expectExitCode(1);

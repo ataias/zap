@@ -54,13 +54,25 @@ pub fn run(comptime T: type, init: std.process.Init) !void {
                 printHelpAndExit(T, init.io);
             }
 
-            inline for (T.meta.subcommands) |Sub| {
-                if (std.mem.eql(u8, first, comptime help.subcommandName(Sub))) {
+            const subcommand_names = comptime blk: {
+                var names: [T.meta.subcommands.len][]const u8 = undefined;
+                for (T.meta.subcommands, 0..) |Sub, i| {
+                    names[i] = help.subcommandName(Sub);
+                }
+                break :blk names;
+            };
+
+            inline for (subcommand_names, T.meta.subcommands) |name, Sub| {
+                if (std.mem.eql(u8, first, name)) {
                     return runSubcommand(Sub, argv[1..], init, &err_writer.interface);
                 }
             }
 
-            errors.printError(&err_writer.interface, "unknown subcommand '{s}'", .{first});
+            if (errors.suggestClosest(first, &subcommand_names)) |suggestion| {
+                errors.printError(&err_writer.interface, "unknown subcommand '{s}', did you mean '{s}'?", .{ first, suggestion });
+            } else {
+                errors.printError(&err_writer.interface, "unknown subcommand '{s}'", .{first});
+            }
             errors.printUsageHint(&err_writer.interface, comptime commandName(T));
             err_writer.interface.flush() catch {};
             std.process.exit(1);
