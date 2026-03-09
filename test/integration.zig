@@ -4,12 +4,14 @@ pub fn addIntegrationTests(
     b: *std.Build,
     add_exe: *std.Build.Step.Compile,
     math_exe: *std.Build.Step.Compile,
+    shell_completion_exe: *std.Build.Step.Compile,
     zap_mod: *std.Build.Module,
 ) *std.Build.Step {
     const step = b.step("integration-test", "Run integration tests for examples");
 
     addExampleTests(b, step, add_exe);
     addMathTests(b, step, math_exe);
+    addShellCompletionTests(b, step, shell_completion_exe);
     addCompileErrorTests(b, step, zap_mod);
 
     return step;
@@ -100,6 +102,61 @@ fn addMathTests(
         run.addArgs(&.{"add"});
         run.expectStdErrMatch("missing required argument");
         run.expectExitCode(1);
+        step.dependOn(&run.step);
+    }
+}
+
+fn addShellCompletionTests(
+    b: *std.Build,
+    step: *std.Build.Step,
+    exe: *std.Build.Step.Compile,
+) void {
+    // --help shows visible subcommands, hides debug-info
+    {
+        const run = b.addRunArtifact(exe);
+        run.addArgs(&.{"--help"});
+        run.expectStdOutMatch("deploy");
+        step.dependOn(&run.step);
+    }
+    {
+        const run = b.addRunArtifact(exe);
+        run.addArgs(&.{"--help"});
+        run.expectStdOutMatch("status");
+        step.dependOn(&run.step);
+    }
+    // deploy subcommand works
+    {
+        const run = b.addRunArtifact(exe);
+        run.addArgs(&.{ "deploy", "--target", "prod" });
+        run.expectStdOutMatch("deploying to prod");
+        step.dependOn(&run.step);
+    }
+    // deploy --help shows visible fields, hides debug-trace
+    {
+        const run = b.addRunArtifact(exe);
+        run.addArgs(&.{ "deploy", "--help" });
+        run.expectStdOutMatch("--port");
+        step.dependOn(&run.step);
+    }
+    // hidden field can still be parsed
+    {
+        const run = b.addRunArtifact(exe);
+        run.addArgs(&.{ "deploy", "--target", "staging", "--debug-trace" });
+        run.expectStdOutMatch("debug trace enabled");
+        step.dependOn(&run.step);
+    }
+    // hidden subcommand can still be dispatched
+    {
+        const run = b.addRunArtifact(exe);
+        run.addArgs(&.{"debug-info"});
+        run.expectStdOutMatch("debug info output");
+        step.dependOn(&run.step);
+    }
+    // status subcommand works
+    {
+        const run = b.addRunArtifact(exe);
+        run.addArgs(&.{"status"});
+        run.expectStdOutMatch("status: running");
         step.dependOn(&run.step);
     }
 }

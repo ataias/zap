@@ -41,6 +41,17 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(math_exe);
 
-    const integration_step = integration.addIntegrationTests(b, add_exe, math_exe, zap_mod);
+    const shell_completion_exe = b.addExecutable(.{
+        .name = "shell-completion",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("example/shell-completion.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "zap", .module = zap_mod }},
+        }),
+    });
+    b.installArtifact(shell_completion_exe);
+
+    const integration_step = integration.addIntegrationTests(b, add_exe, math_exe, shell_completion_exe, zap_mod);
     test_step.dependOn(integration_step);
 }

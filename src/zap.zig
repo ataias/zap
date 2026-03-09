@@ -11,6 +11,8 @@ pub const ArgKind = introspect.ArgKind;
 pub const CommandMeta = struct {
     description: []const u8 = "",
     subcommands: []const type = &.{},
+    hidden_fields: []const []const u8 = &.{},
+    hidden_subcommands: []const []const u8 = &.{},
 };
 
 pub fn Positional(comptime T: type) type {

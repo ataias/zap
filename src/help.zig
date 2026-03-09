@@ -14,6 +14,14 @@ pub fn generateHelp(
         T.meta.field_descriptions
     else
         null;
+    const hidden_fields: []const []const u8 = if (@hasDecl(T, "meta") and @hasField(@TypeOf(T.meta), "hidden_fields"))
+        T.meta.hidden_fields
+    else
+        &.{};
+    const hidden_subcommands: []const []const u8 = if (@hasDecl(T, "meta") and @hasField(@TypeOf(T.meta), "hidden_subcommands"))
+        T.meta.hidden_subcommands
+    else
+        &.{};
 
     const has_subcommands = @hasDecl(T, "meta") and @hasField(@TypeOf(T.meta), "subcommands") and T.meta.subcommands.len > 0;
 
@@ -25,12 +33,12 @@ pub fn generateHelp(
 
     var has_options = false;
     for (arg_infos) |ai| {
-        if (ai.kind != .positional) has_options = true;
+        if (ai.kind != .positional and !isHidden(hidden_fields, ai.field_name)) has_options = true;
     }
     if (has_options) try writer.writeAll(" [options]");
 
     for (arg_infos) |ai| {
-        if (ai.kind == .positional) {
+        if (ai.kind == .positional and !isHidden(hidden_fields, ai.field_name)) {
             if (ai.required) {
                 if (ai.is_multi) {
                     try writer.print(" <{s}>...", .{ai.long_name});
@@ -56,6 +64,7 @@ pub fn generateHelp(
         try writer.writeAll("\nSUBCOMMANDS:\n");
         inline for (T.meta.subcommands) |Sub| {
             const sub_name = comptime subcommandName(Sub);
+            if (comptime isHiddenComptime(hidden_subcommands, sub_name)) continue;
             const sub_desc = if (@hasDecl(Sub, "meta")) Sub.meta.description else "";
             try writer.print("  {s: <22} {s}\n", .{ sub_name, sub_desc });
         }
@@ -63,7 +72,7 @@ pub fn generateHelp(
 
     var has_positionals = false;
     for (arg_infos) |ai| {
-        if (ai.kind == .positional) {
+        if (ai.kind == .positional and !isHidden(hidden_fields, ai.field_name)) {
             has_positionals = true;
             break;
         }
@@ -73,6 +82,7 @@ pub fn generateHelp(
         try writer.writeAll("\nARGUMENTS:\n");
         for (arg_infos) |ai| {
             if (ai.kind != .positional) continue;
+            if (isHidden(hidden_fields, ai.field_name)) continue;
             const desc = getFieldDescription(field_descriptions, ai.field_name);
             if (ai.is_multi) {
                 try writer.print("  <{s}>...", .{ai.long_name});
@@ -93,9 +103,24 @@ pub fn generateHelp(
     try writer.writeAll("\nOPTIONS:\n");
     for (arg_infos) |ai| {
         if (ai.kind == .positional) continue;
+        if (isHidden(hidden_fields, ai.field_name)) continue;
         try writeOptionLine(writer, ai, getFieldDescription(field_descriptions, ai.field_name));
     }
     try writer.writeAll("  -h, --help             Show help information\n");
+}
+
+fn isHidden(hidden: []const []const u8, name: []const u8) bool {
+    for (hidden) |h| {
+        if (std.mem.eql(u8, h, name)) return true;
+    }
+    return false;
+}
+
+fn isHiddenComptime(comptime hidden: []const []const u8, comptime name: []const u8) bool {
+    for (hidden) |h| {
+        if (std.mem.eql(u8, h, name)) return true;
+    }
+    return false;
 }
 
 fn writeOptionLine(writer: *std.Io.Writer, ai: ArgInfo, desc: ?[]const u8) !void {
@@ -303,6 +328,70 @@ test "help with optional positional" {
         \\
         \\ARGUMENTS:
         \\  <name>
+        \\
+        \\OPTIONS:
+        \\  -h, --help             Show help information
+        \\
+    , writer.buffered());
+}
+
+test "help with hidden field" {
+    const Cmd = struct {
+        pub const meta: CommandMeta = .{
+            .description = "Start the server",
+            .hidden_fields = &.{"debug_dump"},
+        };
+
+        port: u16 = 8080,
+        verbose: bool = false,
+        debug_dump: bool = false,
+    };
+
+    var buf: [4096]u8 = undefined;
+    var writer = std.Io.Writer.fixed(&buf);
+    try generateHelp(Cmd, "server", &writer);
+
+    try testing.expectEqualStrings(
+        \\USAGE: server [options]
+        \\
+        \\Start the server
+        \\
+        \\OPTIONS:
+        \\  -p, --port            (default: 8080)
+        \\  -v, --verbose         (default: false)
+        \\  -h, --help             Show help information
+        \\
+    , writer.buffered());
+}
+
+test "help with hidden subcommand" {
+    const Migrate = struct {
+        pub const meta: CommandMeta = .{ .description = "Run migrations" };
+        pub fn run(_: @This(), _: std.process.Init) !void {}
+    };
+    const DebugSchema = struct {
+        pub const meta: CommandMeta = .{ .description = "Dump raw schema" };
+        pub fn run(_: @This(), _: std.process.Init) !void {}
+    };
+    const Db = struct {
+        pub const meta: CommandMeta = .{
+            .description = "Database management",
+            .subcommands = &.{ Migrate, DebugSchema },
+            .hidden_subcommands = &.{"debug-schema"},
+        };
+    };
+
+    var buf: [4096]u8 = undefined;
+    var writer = std.Io.Writer.fixed(&buf);
+    try generateHelp(Db, "db", &writer);
+
+    try testing.expectEqualStrings(
+        \\USAGE: db <subcommand>
+        \\
+        \\Database management
+        \\
+        \\SUBCOMMANDS:
+        \\  migrate                Run migrations
         \\
         \\OPTIONS:
         \\  -h, --help             Show help information

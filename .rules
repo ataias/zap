@@ -1,0 +1,53 @@
+# CLAUDE.md
+
+## Build commands
+
+```bash
+zig build            # Build examples + run all tests (default step)
+zig build test       # Run unit tests + integration tests
+```
+
+## Project structure
+
+```
+src/
+  zap.zig            # Public API, CommandMeta, Positional
+  parser.zig         # Argument parsing
+  help.zig           # Help text generation
+  introspect.zig     # Comptime struct introspection
+  tokenizer.zig      # Tokenizer
+  errors.zig         # Error types
+example/             # Runnable example programs
+test/integration.zig # Integration tests (run compiled examples)
+```
+
+## Testing patterns
+
+### Unit tests (src/)
+
+Tests are embedded in source files using Zig's `test` blocks.
+
+**Help output tests must compare the full output** using `expectEqualStrings`
+with multi-line strings. Do not use partial matching (`indexOf`) for help output
+tests -- always assert the complete expected output so regressions in formatting,
+ordering, or omitted fields are caught.
+
+```zig
+try testing.expectEqualStrings(
+    \\USAGE: server [options]
+    \\
+    \\Start the server
+    \\
+    \\OPTIONS:
+    \\  -p, --port            (default: 8080)
+    \\  -h, --help             Show help information
+    \\
+, writer.buffered());
+```
+
+### Integration tests (test/integration.zig)
+
+Integration tests run compiled example binaries and check stdout/stderr. These
+use `expectStdOutEqual` for exact matches or `expectStdOutMatch` /
+`expectStdErrMatch` for substring matches, which is appropriate since they test
+end-to-end behavior of full binaries.

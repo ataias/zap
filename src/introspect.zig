@@ -16,6 +16,7 @@ pub const ArgInfo = struct {
     type_name: []const u8,
     default_text: ?[]const u8,
     is_multi: bool,
+    enum_values: ?[]const []const u8,
 };
 
 fn isPositionalWrapper(comptime T: type) bool {
@@ -139,6 +140,16 @@ pub fn introspect(comptime T: type) []const ArgInfo {
             else
                 null;
 
+            const enum_values: ?[]const []const u8 = if (@typeInfo(core_type) == .@"enum") blk: {
+                const enum_fields = @typeInfo(core_type).@"enum".fields;
+                var names: [enum_fields.len][]const u8 = undefined;
+                for (enum_fields, 0..) |ef, ei| {
+                    names[ei] = ef.name;
+                }
+                const final = names;
+                break :blk &final;
+            } else null;
+
             args[i] = .{
                 .field_name = field.name,
                 .long_name = snakeToKebab(field.name),
@@ -148,6 +159,7 @@ pub fn introspect(comptime T: type) []const ArgInfo {
                 .type_name = typeDisplayName(core_type),
                 .default_text = default_text,
                 .is_multi = is_multi,
+                .enum_values = enum_values,
             };
         }
 
@@ -223,6 +235,25 @@ test "enum option" {
     try testing.expectEqual(ArgKind.option, args[0].kind);
     try testing.expect(!args[0].required);
     try testing.expectEqualStrings("fast", args[0].default_text.?);
+    try testing.expectEqual(@as(usize, 2), args[0].enum_values.?.len);
+    try testing.expectEqualStrings("fast", args[0].enum_values.?[0]);
+    try testing.expectEqualStrings("slow", args[0].enum_values.?[1]);
+}
+
+test "non-enum field has null enum_values" {
+    const Cmd = struct { verbose: bool = false };
+    const args = comptime introspect(Cmd);
+    try testing.expectEqual(@as(?[]const []const u8, null), args[0].enum_values);
+}
+
+test "optional enum field populates enum_values" {
+    const Color = enum { red, green, blue };
+    const Cmd = struct { color: ?Color = null };
+    const args = comptime introspect(Cmd);
+    try testing.expectEqual(@as(usize, 3), args[0].enum_values.?.len);
+    try testing.expectEqualStrings("red", args[0].enum_values.?[0]);
+    try testing.expectEqualStrings("green", args[0].enum_values.?[1]);
+    try testing.expectEqualStrings("blue", args[0].enum_values.?[2]);
 }
 
 test "snake_case to kebab-case" {
