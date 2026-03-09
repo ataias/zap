@@ -42,6 +42,18 @@ jobs:
 
       - run: zig build test -Doptimize=${{ matrix.optimize }}
 
+  test-shell-completions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: master
+
+      - run: sudo apt-get install -y fish
+      - run: zig build test-shell-completions
+
   cross-compile:
     runs-on: ubuntu-latest
     steps:

@@ -54,4 +54,13 @@ pub fn build(b: *std.Build) void {
 
     const integration_step = integration.addIntegrationTests(b, add_exe, math_exe, shell_completion_exe, zap_mod);
     test_step.dependOn(integration_step);
+
+    const test_shell_completions_step = b.step(
+        "test-shell-completions",
+        "Run shell completion tests",
+    );
+    const fish_test = b.addSystemCommand(&.{"fish"});
+    fish_test.addFileArg(b.path("tests/completions/test_fish.fish"));
+    fish_test.addArtifactArg(shell_completion_exe);
+    test_shell_completions_step.dependOn(&fish_test.step);
 }

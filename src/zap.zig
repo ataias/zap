@@ -4,6 +4,7 @@ pub const tokenizer = @import("tokenizer.zig");
 pub const parser = @import("parser.zig");
 pub const help = @import("help.zig");
 pub const errors = @import("errors.zig");
+pub const complete = @import("complete.zig");
 
 pub const ArgInfo = introspect.ArgInfo;
 pub const ArgKind = introspect.ArgKind;
@@ -121,4 +122,5 @@ test {
     _ = parser;
     _ = help;
     _ = errors;
+    _ = complete;
 }
