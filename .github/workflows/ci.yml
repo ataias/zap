@@ -54,6 +54,17 @@ jobs:
       - run: sudo apt-get install -y fish zsh expect
       - run: zig build test-shell-completions
 
+  test-as-dependency:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: master
+
+      - run: bash test/consumer/test_as_dependency.sh "git+https://github.com/${{ github.repository }}.git#${{ github.sha }}"
+
   cross-compile:
     runs-on: ubuntu-latest
     steps:
