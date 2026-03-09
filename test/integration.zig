@@ -59,6 +59,13 @@ fn addExampleTests(
         run.expectExitCode(1);
         step.dependOn(&run.step);
     }
+    // --generate-completion-script works for simple (no subcommand) command
+    {
+        const run = b.addRunArtifact(add_exe);
+        run.addArgs(&.{ "--generate-completion-script", "fish" });
+        run.expectStdOutMatch("complete -c add");
+        step.dependOn(&run.step);
+    }
 }
 
 fn addMathTests(
@@ -102,6 +109,13 @@ fn addMathTests(
         run.addArgs(&.{"add"});
         run.expectStdErrMatch("missing required argument");
         run.expectExitCode(1);
+        step.dependOn(&run.step);
+    }
+    // --generate-completion-script works for subcommand-based command
+    {
+        const run = b.addRunArtifact(math_exe);
+        run.addArgs(&.{ "--generate-completion-script", "fish" });
+        run.expectStdOutMatch("complete -c math");
         step.dependOn(&run.step);
     }
 }
@@ -157,6 +171,29 @@ fn addShellCompletionTests(
         const run = b.addRunArtifact(exe);
         run.addArgs(&.{"status"});
         run.expectStdOutMatch("status: running");
+        step.dependOn(&run.step);
+    }
+    // --generate-completion-script fish exits 0 with completion output
+    {
+        const run = b.addRunArtifact(exe);
+        run.addArgs(&.{ "--generate-completion-script", "fish" });
+        run.expectStdOutMatch("complete -c");
+        step.dependOn(&run.step);
+    }
+    // --generate-completion-script with missing shell exits 1
+    {
+        const run = b.addRunArtifact(exe);
+        run.addArgs(&.{"--generate-completion-script"});
+        run.expectStdErrMatch("requires a shell name");
+        run.expectExitCode(1);
+        step.dependOn(&run.step);
+    }
+    // --generate-completion-script with invalid shell exits 1
+    {
+        const run = b.addRunArtifact(exe);
+        run.addArgs(&.{ "--generate-completion-script", "invalid" });
+        run.expectStdErrMatch("unknown shell");
+        run.expectExitCode(1);
         step.dependOn(&run.step);
     }
 }

@@ -39,6 +39,10 @@ pub fn run(comptime T: type, init: std.process.Init) !void {
     const argv_slice = try init.minimal.args.toSlice(allocator);
     const argv: []const []const u8 = if (argv_slice.len > 0) argv_slice[1..] else argv_slice;
 
+    if (argv.len >= 1 and std.mem.eql(u8, argv[0], "--generate-completion-script")) {
+        generateCompletionAndExit(T, argv, init);
+    }
+
     var err_buf: [4096]u8 = undefined;
     var err_writer = std.Io.File.stderr().writer(init.io, &err_buf);
 
@@ -95,6 +99,30 @@ fn runSubcommand(comptime Sub: type, argv: []const []const u8, init: std.process
         },
     };
     return instance.run(init);
+}
+
+fn generateCompletionAndExit(comptime T: type, argv: []const []const u8, init: std.process.Init) noreturn {
+    const shell_name = if (argv.len >= 2) argv[1] else {
+        var err_buf: [256]u8 = undefined;
+        var ew = std.Io.File.stderr().writer(init.io, &err_buf);
+        ew.interface.writeAll("error: --generate-completion-script requires a shell name (fish, zsh, bash)\n") catch {};
+        ew.interface.flush() catch {};
+        std.process.exit(1);
+    };
+    const shell = std.meta.stringToEnum(complete.Shell, shell_name) orelse {
+        var err_buf: [256]u8 = undefined;
+        var ew = std.Io.File.stderr().writer(init.io, &err_buf);
+        ew.interface.print("error: unknown shell '{s}'. Expected: fish, zsh, bash\n", .{shell_name}) catch {};
+        ew.interface.flush() catch {};
+        std.process.exit(1);
+    };
+    var buf: [8192]u8 = undefined;
+    var writer = std.Io.File.stdout().writer(init.io, &buf);
+    complete.generate(&writer.interface, T, comptime commandName(T), shell) catch {
+        std.process.exit(1);
+    };
+    writer.interface.flush() catch {};
+    std.process.exit(0);
 }
 
 fn printHelpAndExit(comptime T: type, io: std.Io) noreturn {
