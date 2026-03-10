@@ -5,20 +5,31 @@
 ```bash
 zig build            # Build examples + run all tests (default step)
 zig build test       # Run unit tests + integration tests
+zig build test-shell-completions  # Test shell completion scripts (requires fish, zsh, expect)
 ```
 
 ## Project structure
 
 ```
 src/
-  zap.zig            # Public API, CommandMeta, Positional
-  parser.zig         # Argument parsing
-  help.zig           # Help text generation
-  introspect.zig     # Comptime struct introspection
-  tokenizer.zig      # Tokenizer
-  errors.zig         # Error types
-example/             # Runnable example programs
-test/integration.zig # Integration tests (run compiled examples)
+  zap.zig            # Public API: CommandMeta, Positional, run(), parseFromSlice()
+  parser.zig         # Argument parsing (maps tokens to struct fields)
+  help.zig           # Help text generation, camelToKebab naming
+  introspect.zig     # Comptime struct introspection (ArgInfo, ArgKind)
+  tokenizer.zig      # Argv tokenizer (long/short flags, options, positionals, terminators)
+  errors.zig         # Error types, Levenshtein distance, typo suggestions
+  complete.zig       # Shell completion entry point (Shell, CompletionHint)
+  complete/
+    fish.zig         # Fish shell completion generation
+    zsh.zig          # Zsh shell completion generation
+    bash.zig         # Bash shell completion generation
+example/
+  add.zig            # Simple single-command demo (flags, multi-positional)
+  math.zig           # Subcommand demo (add, multiply)
+  shell-completion.zig  # Full-featured demo (enums, completion hints, hidden fields/subcommands)
+test/
+  integration.zig    # Integration tests (run compiled example binaries, check stdout/stderr)
+  consumer/          # Test that zap works as an external package dependency
 ```
 
 ## Testing patterns
@@ -51,3 +62,20 @@ Integration tests run compiled example binaries and check stdout/stderr. These
 use `expectStdOutEqual` for exact matches or `expectStdOutMatch` /
 `expectStdErrMatch` for substring matches, which is appropriate since they test
 end-to-end behavior of full binaries.
+
+### Shell completion tests
+
+Run with `zig build test-shell-completions`. These test actual shell completion
+scripts by invoking fish, zsh, and bash with the generated scripts. Requires
+`fish`, `zsh`, and `expect` to be installed.
+
+## Key conventions
+
+- Field type determines CLI behavior: `bool` = flag, `u8` (default 0) = counted
+  flag, `Positional(T)` = positional, `[]const T` = multi-positional, `?T` =
+  optional
+- `snake_case` field names become `--kebab-case` CLI options
+- `CamelCase` struct names become `kebab-case` subcommand names
+- Short flags are auto-assigned from the first character; collisions resolved at
+  compile time
+- Commands must have a `pub fn run()` or subcommands (enforced at compile time)

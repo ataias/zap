@@ -1,10 +1,12 @@
 # zap
 
+> **Work in progress** -- the API is not yet stable and may change.
+
 A CLI argument parsing library for Zig that uses compile-time reflection to turn
 struct definitions into fully featured command-line interfaces. No macros, no
 code generation, no runtime overhead -- just define a struct and `zap.run` it.
 
-Tracks Zig `master`. Zero dependencies beyond the Zig standard library.
+Zero dependencies beyond the Zig standard library.
 
 ## Quick start
 
@@ -65,6 +67,8 @@ OPTIONS:
 ```
 
 ## Installation
+
+Requires Zig `master` (minimum `0.16.0-dev.2261+d6b3dd25a`).
 
 Add zap as a dependency in your `build.zig.zon`:
 
@@ -185,9 +189,63 @@ OPTIONS:
   -h, --help             Show help information
 ```
 
+## Shell completions
+
+Zap generates shell completion scripts for fish, zsh, and bash. Every command
+built with `zap.run` automatically supports `--generate-completion-script`:
+
+```
+$ myapp --generate-completion-script fish | source  # fish
+$ myapp --generate-completion-script zsh  >_myapp && source _myapp  # zsh
+$ eval "$(myapp --generate-completion-script bash)"  # bash
+```
+
+Fine-tune what the shell suggests by adding `field_completions` to your command
+metadata:
+
+```zig
+pub const meta = .{
+    .field_completions = .{
+        .target = .{ .values = &.{ "prod", "staging", "dev" } },
+        .config = .{ .file_path_with_extensions = &.{ "json", "yaml" } },
+        .service = .{ .from_command = "echo web api worker" },
+    },
+};
+```
+
+Available completion hints:
+
+| Hint | Completes with |
+|---|---|
+| `.file_path` | File paths |
+| `.file_path_with_extensions` | Files matching given extensions |
+| `.dir_path` | Directory paths |
+| `.executable` | Executable commands |
+| `.values` | A fixed set of strings |
+| `.from_command` | Output of a shell command |
+
+Enum fields automatically complete with their variant names.
+
+## Hidden fields and subcommands
+
+Fields and subcommands can be hidden from help output while still being
+functional:
+
+```zig
+pub const meta: zap.CommandMeta = .{
+    .hidden_fields = &.{"debug_trace"},
+    .hidden_subcommands = &.{"debug-info"},
+    .subcommands = &.{ Deploy, Status, DebugInfo },
+};
+```
+
+Hidden items are omitted from `--help` and completion scripts but are still
+accepted when used directly.
+
 ## Error handling
 
-Zap produces clear error messages and suggests corrections for typos:
+Zap produces clear error messages and suggests corrections for typos using
+Levenshtein distance:
 
 ```
 $ add --badopt
@@ -196,6 +254,9 @@ Usage: add [options] <values>...
 
 $ add --verbos
 error: unknown option '--verbos', did you mean '--verbose'?
+
+$ math ad
+error: unknown subcommand 'ad', did you mean 'add'?
 ```
 
 ## Building and testing
@@ -210,6 +271,15 @@ zig build test -Doptimize=ReleaseSafe
 # Build the examples
 zig build
 ```
+
+## Cross-compilation
+
+Zap is tested against the following targets in CI:
+
+- `aarch64-linux`
+- `x86_64-macos`, `aarch64-macos`
+- `x86_64-windows`
+- `x86_64-freebsd`, `aarch64-freebsd`
 
 ## License
 
