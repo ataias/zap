@@ -41,6 +41,17 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(math_exe);
 
+    const async_square_exe = b.addExecutable(.{
+        .name = "async-square",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("example/async-square.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "zap", .module = zap_mod }},
+        }),
+    });
+    b.installArtifact(async_square_exe);
+
     const shell_completion_exe = b.addExecutable(.{
         .name = "shell-completion",
         .root_module = b.createModule(.{
