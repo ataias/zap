@@ -66,7 +66,7 @@ pub fn parseArgs(comptime T: type, argv: []const []const u8, allocator: std.mem.
         }
     }
 
-    var positional_strings: std.ArrayList([]const u8) = .{};
+    var positional_strings: std.ArrayList([]const u8) = .empty;
     defer positional_strings.deinit(allocator);
     var single_positional_index: usize = 0;
 
@@ -135,7 +135,7 @@ pub fn parseArgs(comptime T: type, argv: []const []const u8, allocator: std.mem.
     inline for (fields, 0..) |f, i| {
         if (arg_infos[i].is_multi and positional_strings.items.len > 0) {
             const core_type = sliceElementType(f.type);
-            var typed_values: std.ArrayList(core_type) = .{};
+            var typed_values: std.ArrayList(core_type) = .empty;
             for (positional_strings.items) |str| {
                 const parsed = parseValue(core_type, str) catch {
                     errors.printError(reporter, "invalid value '{s}' for argument <{s}>: expected {s}", .{ str, arg_infos[i].long_name, arg_infos[i].type_name });

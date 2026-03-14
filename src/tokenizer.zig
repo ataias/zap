@@ -58,7 +58,7 @@ pub const Tokenizer = struct {
     }
 
     pub fn collectAll(self: *Tokenizer, allocator: std.mem.Allocator) ![]const Token {
-        var tokens: std.ArrayList(Token) = .{};
+        var tokens: std.ArrayList(Token) = .empty;
         defer tokens.deinit(allocator);
         while (self.next()) |tok| {
             try tokens.append(allocator, tok);
