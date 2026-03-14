@@ -1,0 +1,3 @@
+[tools]
+zig = "master"
+zls = { version = "master", depends = ["zig"] }
