@@ -63,7 +63,18 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(shell_completion_exe);
 
-    const integration_step = integration.addIntegrationTests(b, add_exe, math_exe, shell_completion_exe, zap_mod);
+    const nested_exe = b.addExecutable(.{
+        .name = "nested",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("example/nested.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "zap", .module = zap_mod }},
+        }),
+    });
+    b.installArtifact(nested_exe);
+
+    const integration_step = integration.addIntegrationTests(b, add_exe, math_exe, shell_completion_exe, nested_exe, zap_mod);
     test_step.dependOn(integration_step);
 
     const test_shell_completions_step = b.step(
@@ -75,6 +86,14 @@ pub fn build(b: *std.Build) void {
         const run = b.addSystemCommand(&.{"bash"});
         run.addFileArg(test_script);
         run.addArtifactArg(shell_completion_exe);
+        run.addArg(shell);
+        test_shell_completions_step.dependOn(&run.step);
+    }
+    const nested_test_script = b.path("tests/completions/test_nested_completions.sh");
+    for ([_][]const u8{ "fish", "bash", "zsh" }) |shell| {
+        const run = b.addSystemCommand(&.{"bash"});
+        run.addFileArg(nested_test_script);
+        run.addArtifactArg(nested_exe);
         run.addArg(shell);
         test_shell_completions_step.dependOn(&run.step);
     }

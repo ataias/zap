@@ -19,34 +19,71 @@ pub fn generate(
         Command.meta.subcommands.len > 0;
 
     if (has_subcommands) {
-        try writeCommand(writer, Command, cmd_name, "__fish_use_subcommand");
+        try generateBranch(writer, Command, cmd_name, "__fish_use_subcommand");
+    } else {
+        try writeCommand(writer, Command, cmd_name, null);
+    }
+}
 
-        const hidden_subcommands: []const []const u8 = if (@hasDecl(Command, "meta") and
+fn generateBranch(
+    writer: *std.Io.Writer,
+    comptime Command: type,
+    comptime cmd_name: []const u8,
+    comptime condition: []const u8,
+) !void {
+    const hidden_subcommands: []const []const u8 = comptime if (@hasDecl(Command, "meta") and
+        @hasField(@TypeOf(Command.meta), "hidden_subcommands"))
+        Command.meta.hidden_subcommands
+    else
+        &.{};
+
+    try writeCommand(writer, Command, cmd_name, condition);
+
+    inline for (Command.meta.subcommands) |Sub| {
+        const sub_name = comptime help_mod.subcommandName(Sub);
+        if (comptime isHiddenComptime(hidden_subcommands, sub_name)) continue;
+        const sub_desc = if (@hasDecl(Sub, "meta")) Sub.meta.description else "";
+        try writer.print("complete -c {s} -n '{s}' -f -a {s}", .{ cmd_name, condition, sub_name });
+        if (sub_desc.len > 0) {
+            try writer.writeAll(" -d '");
+            try writeFishEscaped(writer, sub_desc);
+            try writer.writeByte('\'');
+        }
+        try writer.writeByte('\n');
+    }
+
+    inline for (Command.meta.subcommands) |Sub| {
+        const sub_name = comptime help_mod.subcommandName(Sub);
+        if (comptime isHiddenComptime(hidden_subcommands, sub_name)) continue;
+
+        const sub_has_subs = @hasDecl(Sub, "meta") and
+            @hasField(@TypeOf(Sub.meta), "subcommands") and
+            Sub.meta.subcommands.len > 0;
+
+        if (sub_has_subs) {
+            try generateBranch(writer, Sub, cmd_name, comptime branchCondition(Sub));
+        } else {
+            try writeCommand(writer, Sub, cmd_name, "__fish_seen_subcommand_from " ++ sub_name);
+        }
+    }
+}
+
+fn branchCondition(comptime Command: type) []const u8 {
+    comptime {
+        const parent_name = help_mod.subcommandName(Command);
+        const hidden: []const []const u8 = if (@hasDecl(Command, "meta") and
             @hasField(@TypeOf(Command.meta), "hidden_subcommands"))
             Command.meta.hidden_subcommands
         else
             &.{};
 
-        inline for (Command.meta.subcommands) |Sub| {
-            const sub_name = comptime help_mod.subcommandName(Sub);
-            if (comptime isHiddenComptime(hidden_subcommands, sub_name)) continue;
-            const sub_desc = if (@hasDecl(Sub, "meta")) Sub.meta.description else "";
-            try writer.print("complete -c {s} -n '__fish_use_subcommand' -f -a {s}", .{ cmd_name, sub_name });
-            if (sub_desc.len > 0) {
-                try writer.writeAll(" -d '");
-                try writeFishEscaped(writer, sub_desc);
-                try writer.writeByte('\'');
-            }
-            try writer.writeByte('\n');
+        var result: []const u8 = "__fish_seen_subcommand_from " ++ parent_name ++ "; and not __fish_seen_subcommand_from";
+        for (Command.meta.subcommands) |Sub| {
+            const sub_name = help_mod.subcommandName(Sub);
+            if (isHiddenComptime(hidden, sub_name)) continue;
+            result = result ++ " " ++ sub_name;
         }
-
-        inline for (Command.meta.subcommands) |Sub| {
-            const sub_name = comptime help_mod.subcommandName(Sub);
-            if (comptime isHiddenComptime(hidden_subcommands, sub_name)) continue;
-            try writeCommand(writer, Sub, cmd_name, "__fish_seen_subcommand_from " ++ sub_name);
-        }
-    } else {
-        try writeCommand(writer, Command, cmd_name, null);
+        return result;
     }
 }
 
@@ -572,6 +609,54 @@ test "fish: description with single quote is escaped" {
     try testing.expectEqualStrings(
         \\complete -c tool -s h -l help -f -d 'Show help information'
         \\complete -c tool -s n -l name -r -f -d 'it'\''s a name'
+        \\
+    , writer.buffered());
+}
+
+test "fish: nested subcommands" {
+    const Start = struct {
+        pub const meta: CommandMeta = .{ .description = "Start the server" };
+        port: u16 = 8080,
+        pub fn run(_: @This(), _: std.process.Init) !void {}
+    };
+    const Stop = struct {
+        pub const meta: CommandMeta = .{ .description = "Stop the server" };
+        force: bool = false,
+        pub fn run(_: @This(), _: std.process.Init) !void {}
+    };
+    const Server = struct {
+        pub const meta: CommandMeta = .{
+            .description = "Server management",
+            .subcommands = &.{ Start, Stop },
+        };
+    };
+    const Version = struct {
+        pub const meta: CommandMeta = .{ .description = "Print version" };
+        pub fn run(_: @This(), _: std.process.Init) !void {}
+    };
+    const Cli = struct {
+        pub const meta: CommandMeta = .{
+            .description = "A CLI tool",
+            .subcommands = &.{ Server, Version },
+        };
+    };
+
+    var buf: [8192]u8 = undefined;
+    var writer = std.Io.Writer.fixed(&buf);
+    try generate(&writer, Cli, "tool");
+
+    try testing.expectEqualStrings(
+        \\complete -c tool -n '__fish_use_subcommand' -s h -l help -f -d 'Show help information'
+        \\complete -c tool -n '__fish_use_subcommand' -f -a server -d 'Server management'
+        \\complete -c tool -n '__fish_use_subcommand' -f -a version -d 'Print version'
+        \\complete -c tool -n '__fish_seen_subcommand_from server; and not __fish_seen_subcommand_from start stop' -s h -l help -f -d 'Show help information'
+        \\complete -c tool -n '__fish_seen_subcommand_from server; and not __fish_seen_subcommand_from start stop' -f -a start -d 'Start the server'
+        \\complete -c tool -n '__fish_seen_subcommand_from server; and not __fish_seen_subcommand_from start stop' -f -a stop -d 'Stop the server'
+        \\complete -c tool -n '__fish_seen_subcommand_from start' -s h -l help -f -d 'Show help information'
+        \\complete -c tool -n '__fish_seen_subcommand_from start' -s p -l port -r -f
+        \\complete -c tool -n '__fish_seen_subcommand_from stop' -s h -l help -f -d 'Show help information'
+        \\complete -c tool -n '__fish_seen_subcommand_from stop; and not __fish_contains_opt f force' -s f -l force -f
+        \\complete -c tool -n '__fish_seen_subcommand_from version' -s h -l help -f -d 'Show help information'
         \\
     , writer.buffered());
 }

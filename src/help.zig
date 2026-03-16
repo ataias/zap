@@ -399,6 +399,85 @@ test "help with hidden subcommand" {
     , writer.buffered());
 }
 
+test "help with nested subcommands" {
+    const Start = struct {
+        pub const meta: CommandMeta = .{ .description = "Start the server" };
+        port: u16 = 8080,
+        pub fn run(_: @This()) !void {}
+    };
+    const Stop = struct {
+        pub const meta: CommandMeta = .{ .description = "Stop the server" };
+        force: bool = false,
+        pub fn run(_: @This()) !void {}
+    };
+    const Server = struct {
+        pub const meta: CommandMeta = .{
+            .description = "Server management",
+            .subcommands = &.{ Start, Stop },
+        };
+    };
+    const Version = struct {
+        pub const meta: CommandMeta = .{ .description = "Print version" };
+        pub fn run(_: @This()) !void {}
+    };
+    const Cli = struct {
+        pub const meta: CommandMeta = .{
+            .description = "A CLI tool",
+            .subcommands = &.{ Server, Version },
+        };
+    };
+
+    var buf: [4096]u8 = undefined;
+
+    // Root level
+    var writer = std.Io.Writer.fixed(&buf);
+    try generateHelp(Cli, "tool", &writer);
+    try testing.expectEqualStrings(
+        \\USAGE: tool <subcommand>
+        \\
+        \\A CLI tool
+        \\
+        \\SUBCOMMANDS:
+        \\  server                 Server management
+        \\  version                Print version
+        \\
+        \\OPTIONS:
+        \\  -h, --help             Show help information
+        \\
+    , writer.buffered());
+
+    // Intermediate level (branch node)
+    writer = std.Io.Writer.fixed(&buf);
+    try generateHelp(Server, "tool server", &writer);
+    try testing.expectEqualStrings(
+        \\USAGE: tool server <subcommand>
+        \\
+        \\Server management
+        \\
+        \\SUBCOMMANDS:
+        \\  start                  Start the server
+        \\  stop                   Stop the server
+        \\
+        \\OPTIONS:
+        \\  -h, --help             Show help information
+        \\
+    , writer.buffered());
+
+    // Leaf level
+    writer = std.Io.Writer.fixed(&buf);
+    try generateHelp(Start, "tool server start", &writer);
+    try testing.expectEqualStrings(
+        \\USAGE: tool server start [options]
+        \\
+        \\Start the server
+        \\
+        \\OPTIONS:
+        \\  -p, --port            (default: 8080)
+        \\  -h, --help             Show help information
+        \\
+    , writer.buffered());
+}
+
 test "camelToKebab" {
     try testing.expectEqualStrings("add", comptime camelToKebab("Add"));
     try testing.expectEqualStrings("multiply", comptime camelToKebab("Multiply"));

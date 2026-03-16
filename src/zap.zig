@@ -45,72 +45,100 @@ pub fn run(comptime T: type, init: std.process.Init) !void {
 
     var err_buf: [4096]u8 = undefined;
     var err_writer = std.Io.File.stderr().writer(init.io, &err_buf);
+    const cmd_name = comptime commandName(T);
 
     if (@hasDecl(T, "meta") and T.meta.subcommands.len > 0) {
-        if (argv.len > 0) {
-            const first = argv[0];
-
-            if (std.mem.eql(u8, first, "--help") or std.mem.eql(u8, first, "-h") or std.mem.eql(u8, first, "help")) {
-                printHelpAndExit(T, init.io);
-            }
-
-            const subcommand_names = comptime blk: {
-                var names: [T.meta.subcommands.len][]const u8 = undefined;
-                for (T.meta.subcommands, 0..) |Sub, i| {
-                    names[i] = help.subcommandName(Sub);
-                }
-                break :blk names;
-            };
-
-            inline for (subcommand_names, T.meta.subcommands) |name, Sub| {
-                if (std.mem.eql(u8, first, name)) {
-                    return runSubcommand(Sub, argv[1..], init, &err_writer.interface);
-                }
-            }
-
-            if (errors.suggestClosest(first, &subcommand_names)) |suggestion| {
-                errors.printError(&err_writer.interface, "unknown subcommand '{s}', did you mean '{s}'?", .{ first, suggestion });
-            } else {
-                errors.printError(&err_writer.interface, "unknown subcommand '{s}'", .{first});
-            }
-            errors.printUsageHint(&err_writer.interface, comptime commandName(T));
-            err_writer.interface.flush() catch {};
-            std.process.exit(1);
-        }
-
-        if (@hasDecl(T, "run")) {
-            const instance = parseOrExit(T, argv, init, &err_writer.interface);
-            return instance.run(init);
-        }
-
-        printHelpAndExit(T, init.io);
+        return dispatchSubcommands(T, cmd_name, argv, init, &err_writer.interface);
     }
 
-    const instance = parseOrExit(T, argv, init, &err_writer.interface);
+    const instance = parseOrExit(T, cmd_name, argv, init, &err_writer.interface);
     return instance.run(init);
 }
 
-fn parseOrExit(comptime T: type, argv: []const []const u8, init: std.process.Init, reporter: *std.Io.Writer) T {
-    return parseFromSlice(T, argv, init.arena.allocator(), reporter) catch |err| switch (err) {
-        error.HelpRequested => printHelpAndExit(T, init.io),
-        else => {
-            errors.printUsageHint(reporter, comptime commandName(T));
-            reporter.flush() catch {};
-            std.process.exit(1);
-        },
-    };
+fn dispatchSubcommands(
+    comptime T: type,
+    comptime cmd_name: []const u8,
+    argv: []const []const u8,
+    init: std.process.Init,
+    reporter: *std.Io.Writer,
+) !void {
+    if (argv.len > 0) {
+        const first = argv[0];
+
+        if (std.mem.eql(u8, first, "--help") or std.mem.eql(u8, first, "-h") or std.mem.eql(u8, first, "help")) {
+            printHelpAndExit(T, cmd_name, init.io);
+        }
+
+        const subcommand_names = comptime blk: {
+            var names: [T.meta.subcommands.len][]const u8 = undefined;
+            for (T.meta.subcommands, 0..) |Sub, i| {
+                names[i] = help.subcommandName(Sub);
+            }
+            break :blk names;
+        };
+
+        inline for (subcommand_names, T.meta.subcommands) |name, Sub| {
+            if (std.mem.eql(u8, first, name)) {
+                return runSubcommand(Sub, comptime cmd_name ++ " " ++ name, argv[1..], init, reporter);
+            }
+        }
+
+        if (errors.suggestClosest(first, &subcommand_names)) |suggestion| {
+            errors.printError(reporter, "unknown subcommand '{s}', did you mean '{s}'?", .{ first, suggestion });
+        } else {
+            errors.printError(reporter, "unknown subcommand '{s}'", .{first});
+        }
+        errors.printUsageHint(reporter, cmd_name);
+        reporter.flush() catch {};
+        std.process.exit(1);
+    }
+
+    if (@hasDecl(T, "run")) {
+        const instance = parseOrExit(T, cmd_name, argv, init, reporter);
+        return instance.run(init);
+    }
+
+    printHelpAndExit(T, cmd_name, init.io);
 }
 
-fn runSubcommand(comptime Sub: type, argv: []const []const u8, init: std.process.Init, reporter: *std.Io.Writer) !void {
+fn runSubcommand(
+    comptime Sub: type,
+    comptime cmd_name: []const u8,
+    argv: []const []const u8,
+    init: std.process.Init,
+    reporter: *std.Io.Writer,
+) !void {
+    comptime {
+        const has_subcommands = @hasDecl(Sub, "meta") and @hasField(@TypeOf(Sub.meta), "subcommands") and Sub.meta.subcommands.len > 0;
+        if (!has_subcommands and !@hasDecl(Sub, "run")) {
+            @compileError("command type '" ++ @typeName(Sub) ++ "' must have a pub fn run() or subcommands");
+        }
+    }
+
+    if (@hasDecl(Sub, "meta") and @hasField(@TypeOf(Sub.meta), "subcommands") and Sub.meta.subcommands.len > 0) {
+        return dispatchSubcommands(Sub, cmd_name, argv, init, reporter);
+    }
+
     const instance = parseFromSlice(Sub, argv, init.arena.allocator(), reporter) catch |err| switch (err) {
-        error.HelpRequested => printHelpAndExit(Sub, init.io),
+        error.HelpRequested => printHelpAndExit(Sub, cmd_name, init.io),
         else => {
-            errors.printUsageHint(reporter, comptime help.subcommandName(Sub));
+            errors.printUsageHint(reporter, cmd_name);
             reporter.flush() catch {};
             std.process.exit(1);
         },
     };
     return instance.run(init);
+}
+
+fn parseOrExit(comptime T: type, comptime cmd_name: []const u8, argv: []const []const u8, init: std.process.Init, reporter: *std.Io.Writer) T {
+    return parseFromSlice(T, argv, init.arena.allocator(), reporter) catch |err| switch (err) {
+        error.HelpRequested => printHelpAndExit(T, cmd_name, init.io),
+        else => {
+            errors.printUsageHint(reporter, cmd_name);
+            reporter.flush() catch {};
+            std.process.exit(1);
+        },
+    };
 }
 
 fn generateCompletionAndExit(comptime T: type, argv: []const []const u8, init: std.process.Init) noreturn {
@@ -137,10 +165,10 @@ fn generateCompletionAndExit(comptime T: type, argv: []const []const u8, init: s
     std.process.exit(0);
 }
 
-fn printHelpAndExit(comptime T: type, io: std.Io) noreturn {
+fn printHelpAndExit(comptime T: type, comptime cmd_name: []const u8, io: std.Io) noreturn {
     var buf: [4096]u8 = undefined;
     var writer = std.Io.File.stdout().writer(io, &buf);
-    help.generateHelp(T, comptime commandName(T), &writer.interface) catch {};
+    help.generateHelp(T, cmd_name, &writer.interface) catch {};
     writer.interface.flush() catch {};
     std.process.exit(0);
 }

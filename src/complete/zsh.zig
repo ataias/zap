@@ -22,7 +22,7 @@ pub fn generate(
         Command.meta.subcommands.len > 0;
 
     if (has_subcommands) {
-        try writeSubcommandBody(writer, Command);
+        try writeSubcommandBody(writer, Command, "    ");
     } else {
         try writer.writeAll("    ");
         try writeArguments(writer, Command, "        ");
@@ -35,44 +35,60 @@ pub fn generate(
 fn writeSubcommandBody(
     writer: *std.Io.Writer,
     comptime Command: type,
+    comptime ind: []const u8,
 ) !void {
-    const hidden_subcommands: []const []const u8 = if (@hasDecl(Command, "meta") and
+    const hidden_subcommands: []const []const u8 = comptime if (@hasDecl(Command, "meta") and
         @hasField(@TypeOf(Command.meta), "hidden_subcommands"))
         Command.meta.hidden_subcommands
     else
         &.{};
 
-    try writer.writeAll("    local -a commands=(\n");
+    const ind1 = ind ++ "    ";
+    const ind2 = ind ++ "        ";
+    const ind3 = ind ++ "            ";
+
+    try writer.writeAll(ind ++ "local -a commands=(\n");
     inline for (Command.meta.subcommands) |Sub| {
         const sub_name = comptime help_mod.subcommandName(Sub);
         if (comptime isHiddenComptime(hidden_subcommands, sub_name)) continue;
         const sub_desc = if (@hasDecl(Sub, "meta")) Sub.meta.description else "";
-        try writer.print("        '{s}", .{sub_name});
+        try writer.writeAll(ind1 ++ "'" ++ sub_name);
         if (sub_desc.len > 0) {
             try writer.writeByte(':');
             try writeZshEscaped(writer, sub_desc);
         }
         try writer.writeAll("'\n");
     }
-    try writer.writeAll("    )\n");
+    try writer.writeAll(ind ++ ")\n");
 
-    try writer.writeAll("    _arguments \\\n");
-    try writer.writeAll("        '(-h --help)'{-h,--help}'[Show help information]' \\\n");
-    try writer.writeAll("        '(-): :->command' '(-)*:: :->arg'\n");
-    try writer.writeAll("    case $state in\n");
-    try writer.writeAll("        command) _describe 'command' commands ;;\n");
-    try writer.writeAll("        arg) case $words[1] in\n");
+    try writer.writeAll(ind ++ "_arguments \\\n");
+    try writer.writeAll(ind1 ++ "'(-h --help)'{-h,--help}'[Show help information]' \\\n");
+    try writer.writeAll(ind1 ++ "'(-): :->command' '(-)*:: :->arg'\n");
+    try writer.writeAll(ind ++ "case $state in\n");
+    try writer.writeAll(ind1 ++ "command) _describe 'command' commands ;;\n");
+    try writer.writeAll(ind1 ++ "arg) case $words[1] in\n");
 
     inline for (Command.meta.subcommands) |Sub| {
         const sub_name = comptime help_mod.subcommandName(Sub);
         if (comptime isHiddenComptime(hidden_subcommands, sub_name)) continue;
-        try writer.print("            {s}) ", .{sub_name});
-        try writeArguments(writer, Sub, "                ");
-        try writer.writeAll("            ;;\n");
+
+        const sub_has_subs = @hasDecl(Sub, "meta") and
+            @hasField(@TypeOf(Sub.meta), "subcommands") and
+            Sub.meta.subcommands.len > 0;
+
+        if (sub_has_subs) {
+            try writer.writeAll(ind2 ++ sub_name ++ ")\n");
+            try writeSubcommandBody(writer, Sub, ind3);
+            try writer.writeAll(ind2 ++ ";;\n");
+        } else {
+            try writer.writeAll(ind2 ++ sub_name ++ ") ");
+            try writeArguments(writer, Sub, ind3);
+            try writer.writeAll(ind2 ++ ";;\n");
+        }
     }
 
-    try writer.writeAll("        esac ;;\n");
-    try writer.writeAll("    esac\n");
+    try writer.writeAll(ind1 ++ "esac ;;\n");
+    try writer.writeAll(ind ++ "esac\n");
 }
 
 fn writeArguments(
@@ -661,6 +677,84 @@ test "zsh: positional with completion hint" {
         \\    _arguments \
         \\        '(-h --help)'{-h,--help}'[Show help information]' \
         \\        ':path:_directories'
+        \\}
+        \\compdef _tool tool
+        \\
+    , writer.buffered());
+}
+
+test "zsh: nested subcommands" {
+    const Start = struct {
+        pub const meta: CommandMeta = .{ .description = "Start the server" };
+        port: u16 = 8080,
+        pub fn run(_: @This(), _: std.process.Init) !void {}
+    };
+    const Stop = struct {
+        pub const meta: CommandMeta = .{ .description = "Stop the server" };
+        force: bool = false,
+        pub fn run(_: @This(), _: std.process.Init) !void {}
+    };
+    const Server = struct {
+        pub const meta: CommandMeta = .{
+            .description = "Server management",
+            .subcommands = &.{ Start, Stop },
+        };
+    };
+    const Version = struct {
+        pub const meta: CommandMeta = .{ .description = "Print version" };
+        pub fn run(_: @This(), _: std.process.Init) !void {}
+    };
+    const Cli = struct {
+        pub const meta: CommandMeta = .{
+            .description = "A CLI tool",
+            .subcommands = &.{ Server, Version },
+        };
+    };
+
+    var buf: [8192]u8 = undefined;
+    var writer = std.Io.Writer.fixed(&buf);
+    try generate(&writer, Cli, "tool");
+
+    try testing.expectEqualStrings(
+        \\#compdef tool
+        \\_tool() {
+        \\    local -a commands=(
+        \\        'server:Server management'
+        \\        'version:Print version'
+        \\    )
+        \\    _arguments \
+        \\        '(-h --help)'{-h,--help}'[Show help information]' \
+        \\        '(-): :->command' '(-)*:: :->arg'
+        \\    case $state in
+        \\        command) _describe 'command' commands ;;
+        \\        arg) case $words[1] in
+        \\            server)
+        \\                local -a commands=(
+        \\                    'start:Start the server'
+        \\                    'stop:Stop the server'
+        \\                )
+        \\                _arguments \
+        \\                    '(-h --help)'{-h,--help}'[Show help information]' \
+        \\                    '(-): :->command' '(-)*:: :->arg'
+        \\                case $state in
+        \\                    command) _describe 'command' commands ;;
+        \\                    arg) case $words[1] in
+        \\                        start) _arguments \
+        \\                            '(-h --help)'{-h,--help}'[Show help information]' \
+        \\                            '(-p --port)'{-p,--port}'[]:port:'
+        \\                        ;;
+        \\                        stop) _arguments \
+        \\                            '(-h --help)'{-h,--help}'[Show help information]' \
+        \\                            '(-f --force)'{-f,--force}
+        \\                        ;;
+        \\                    esac ;;
+        \\                esac
+        \\            ;;
+        \\            version) _arguments \
+        \\                '(-h --help)'{-h,--help}'[Show help information]'
+        \\            ;;
+        \\        esac ;;
+        \\    esac
         \\}
         \\compdef _tool tool
         \\

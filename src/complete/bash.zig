@@ -24,7 +24,7 @@ pub fn generate(
     try writer.writeAll("    local prev=\"${COMP_WORDS[COMP_CWORD-1]}\"\n");
 
     if (has_subcommands) {
-        try writeSubcommandBody(writer, Command);
+        try writeSubcommandBody(writer, Command, 1, "    ");
     } else {
         try writeSimpleBody(writer, Command);
     }
@@ -204,15 +204,19 @@ fn writeFilteredCompreply(
 fn writeSubcommandBody(
     writer: *std.Io.Writer,
     comptime Command: type,
+    comptime depth: usize,
+    comptime ind: []const u8,
 ) !void {
-    const hidden_subcommands: []const []const u8 = if (@hasDecl(Command, "meta") and
+    const hidden_subcommands: []const []const u8 = comptime if (@hasDecl(Command, "meta") and
         @hasField(@TypeOf(Command.meta), "hidden_subcommands"))
         Command.meta.hidden_subcommands
     else
         &.{};
 
-    try writer.writeAll("\n    if [[ $COMP_CWORD -eq 1 ]]; then\n");
-    try writer.writeAll("        local commands=\"");
+    const ind1 = ind ++ "    ";
+
+    try writer.print("\n{s}if [[ $COMP_CWORD -eq {d} ]]; then\n", .{ ind, depth });
+    try writer.writeAll(ind1 ++ "local commands=\"");
 
     var first = true;
     inline for (Command.meta.subcommands) |Sub| {
@@ -223,71 +227,88 @@ fn writeSubcommandBody(
         first = false;
     }
     try writer.writeAll(" --help\"\n");
-    try writer.writeAll("        COMPREPLY=($(compgen -W \"$commands\" -- \"$cur\"))\n");
-    try writer.writeAll("        return\n");
-    try writer.writeAll("    fi\n");
+    try writer.writeAll(ind1 ++ "COMPREPLY=($(compgen -W \"$commands\" -- \"$cur\"))\n");
+    try writer.writeAll(ind1 ++ "return\n");
+    try writer.writeAll(ind ++ "fi\n");
 
-    try writer.writeAll("\n    case \"${COMP_WORDS[1]}\" in\n");
+    try writer.print("\n{s}case \"${{COMP_WORDS[{d}]}}\" in\n", .{ ind, depth });
 
     inline for (Command.meta.subcommands) |Sub| {
         const sub_name = comptime help_mod.subcommandName(Sub);
         if (comptime isHiddenComptime(hidden_subcommands, sub_name)) continue;
 
-        try writer.print("        {s})\n", .{sub_name});
+        const sub_has_subs = @hasDecl(Sub, "meta") and
+            @hasField(@TypeOf(Sub.meta), "subcommands") and
+            Sub.meta.subcommands.len > 0;
 
-        const sub_arg_infos = comptime introspect_mod.introspect(Sub);
-        const sub_hidden: []const []const u8 = comptime if (@hasDecl(Sub, "meta") and
-            @hasField(@TypeOf(Sub.meta), "hidden_fields"))
-            Sub.meta.hidden_fields
-        else
-            &.{};
+        const body_ind = ind1 ++ "    ";
+        try writer.writeAll(ind1 ++ sub_name ++ ")\n");
 
-        var has_value_options = false;
+        if (sub_has_subs) {
+            try writeSubcommandBody(writer, Sub, depth + 1, body_ind);
+        } else {
+            try writeLeafBody(writer, Sub, body_ind);
+        }
+        try writer.writeAll(body_ind ++ ";;\n");
+    }
+
+    try writer.writeAll(ind ++ "esac\n");
+}
+
+fn writeLeafBody(
+    writer: *std.Io.Writer,
+    comptime Sub: type,
+    comptime ind: []const u8,
+) !void {
+    const sub_arg_infos = comptime introspect_mod.introspect(Sub);
+    const sub_hidden: []const []const u8 = comptime if (@hasDecl(Sub, "meta") and
+        @hasField(@TypeOf(Sub.meta), "hidden_fields"))
+        Sub.meta.hidden_fields
+    else
+        &.{};
+
+    var has_value_options = false;
+    inline for (0..sub_arg_infos.len) |j| {
+        const sai = sub_arg_infos[j];
+        if (comptime isHiddenComptime(sub_hidden, sai.field_name)) continue;
+        if (sai.kind == .option) {
+            has_value_options = true;
+        }
+    }
+
+    if (has_value_options) {
+        try writer.writeAll(ind ++ "case \"$prev\" in\n");
         inline for (0..sub_arg_infos.len) |j| {
             const sai = sub_arg_infos[j];
             if (comptime isHiddenComptime(sub_hidden, sai.field_name)) continue;
-            if (sai.kind == .option) {
-                has_value_options = true;
+            if (sai.kind != .option) continue;
+
+            const hint = comptime getCompletionHint(Sub, sai.field_name);
+
+            try writer.print("{s}    --{s}", .{ ind, sai.long_name });
+            if (sai.short_name) |s| {
+                try writer.print("|-{c}", .{s});
+            }
+            try writer.writeAll(") ");
+
+            if (comptime hint != .none) {
+                try writeBashCompletionHint(writer, hint);
+                try writer.writeAll("; return ;;\n");
+            } else if (sai.enum_values) |vals| {
+                try writer.writeAll("COMPREPLY=($(compgen -W \"");
+                for (vals, 0..) |v, vi| {
+                    if (vi > 0) try writer.writeByte(' ');
+                    try writeBashEscaped(writer, v);
+                }
+                try writer.writeAll("\" -- \"$cur\")); return ;;\n");
+            } else {
+                try writer.writeAll("return ;;\n");
             }
         }
-
-        if (has_value_options) {
-            try writer.writeAll("            case \"$prev\" in\n");
-            inline for (0..sub_arg_infos.len) |j| {
-                const sai = sub_arg_infos[j];
-                if (comptime isHiddenComptime(sub_hidden, sai.field_name)) continue;
-                if (sai.kind != .option) continue;
-
-                const hint = comptime getCompletionHint(Sub, sai.field_name);
-
-                try writer.print("                --{s}", .{sai.long_name});
-                if (sai.short_name) |s| {
-                    try writer.print("|-{c}", .{s});
-                }
-                try writer.writeAll(") ");
-
-                if (comptime hint != .none) {
-                    try writeBashCompletionHint(writer, hint);
-                    try writer.writeAll("; return ;;\n");
-                } else if (sai.enum_values) |vals| {
-                    try writer.writeAll("COMPREPLY=($(compgen -W \"");
-                    for (vals, 0..) |v, vi| {
-                        if (vi > 0) try writer.writeByte(' ');
-                        try writeBashEscaped(writer, v);
-                    }
-                    try writer.writeAll("\" -- \"$cur\")); return ;;\n");
-                } else {
-                    try writer.writeAll("return ;;\n");
-                }
-            }
-            try writer.writeAll("            esac\n");
-        }
-
-        try writeFilteredCompreply(writer, sub_arg_infos, sub_hidden, "            ", &.{});
-        try writer.writeAll("            ;;\n");
+        try writer.writeAll(ind ++ "esac\n");
     }
 
-    try writer.writeAll("    esac\n");
+    try writeFilteredCompreply(writer, sub_arg_infos, sub_hidden, ind, &.{});
 }
 
 fn writeBashCompletionHint(writer: *std.Io.Writer, hint: CompletionHint) !void {
@@ -714,6 +735,93 @@ test "bash: subcommand with option completion hints" {
         \\    esac
         \\}
         \\complete -F _mycli mycli
+        \\
+    , writer.buffered());
+}
+
+test "bash: nested subcommands" {
+    const Start = struct {
+        pub const meta: CommandMeta = .{ .description = "Start the server" };
+        port: u16 = 8080,
+        pub fn run(_: @This(), _: std.process.Init) !void {}
+    };
+    const Stop = struct {
+        pub const meta: CommandMeta = .{ .description = "Stop the server" };
+        force: bool = false,
+        pub fn run(_: @This(), _: std.process.Init) !void {}
+    };
+    const Server = struct {
+        pub const meta: CommandMeta = .{
+            .description = "Server management",
+            .subcommands = &.{ Start, Stop },
+        };
+    };
+    const Version = struct {
+        pub const meta: CommandMeta = .{ .description = "Print version" };
+        pub fn run(_: @This(), _: std.process.Init) !void {}
+    };
+    const Cli = struct {
+        pub const meta: CommandMeta = .{
+            .description = "A CLI tool",
+            .subcommands = &.{ Server, Version },
+        };
+    };
+
+    var buf: [8192]u8 = undefined;
+    var writer = std.Io.Writer.fixed(&buf);
+    try generate(&writer, Cli, "tool");
+
+    try testing.expectEqualStrings(
+        \\_tool() {
+        \\    local cur="${COMP_WORDS[COMP_CWORD]}"
+        \\    local prev="${COMP_WORDS[COMP_CWORD-1]}"
+        \\
+        \\    if [[ $COMP_CWORD -eq 1 ]]; then
+        \\        local commands="server version --help"
+        \\        COMPREPLY=($(compgen -W "$commands" -- "$cur"))
+        \\        return
+        \\    fi
+        \\
+        \\    case "${COMP_WORDS[1]}" in
+        \\        server)
+        \\
+        \\            if [[ $COMP_CWORD -eq 2 ]]; then
+        \\                local commands="start stop --help"
+        \\                COMPREPLY=($(compgen -W "$commands" -- "$cur"))
+        \\                return
+        \\            fi
+        \\
+        \\            case "${COMP_WORDS[2]}" in
+        \\                start)
+        \\                    case "$prev" in
+        \\                        --port|-p) return ;;
+        \\                    esac
+        \\
+        \\                    local _opts=""
+        \\                    for _o in --port; do
+        \\                        [[ " ${COMP_WORDS[*]} " == *" $_o "* ]] || _opts="$_opts $_o"
+        \\                    done
+        \\                    _opts="$_opts --help"
+        \\                    COMPREPLY=($(compgen -W "$_opts" -- "$cur"))
+        \\                    ;;
+        \\                stop)
+        \\
+        \\                    local _opts=""
+        \\                    for _o in --force; do
+        \\                        [[ " ${COMP_WORDS[*]} " == *" $_o "* ]] || _opts="$_opts $_o"
+        \\                    done
+        \\                    _opts="$_opts --help"
+        \\                    COMPREPLY=($(compgen -W "$_opts" -- "$cur"))
+        \\                    ;;
+        \\            esac
+        \\            ;;
+        \\        version)
+        \\
+        \\            COMPREPLY=($(compgen -W "--help" -- "$cur"))
+        \\            ;;
+        \\    esac
+        \\}
+        \\complete -F _tool tool
         \\
     , writer.buffered());
 }

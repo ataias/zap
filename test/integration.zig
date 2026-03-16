@@ -5,6 +5,7 @@ pub fn addIntegrationTests(
     add_exe: *std.Build.Step.Compile,
     math_exe: *std.Build.Step.Compile,
     shell_completion_exe: *std.Build.Step.Compile,
+    nested_exe: *std.Build.Step.Compile,
     zap_mod: *std.Build.Module,
 ) *std.Build.Step {
     const step = b.step("integration-test", "Run integration tests for examples");
@@ -12,6 +13,7 @@ pub fn addIntegrationTests(
     addExampleTests(b, step, add_exe);
     addMathTests(b, step, math_exe);
     addShellCompletionTests(b, step, shell_completion_exe);
+    addNestedTests(b, step, nested_exe);
     addCompileErrorTests(b, step, zap_mod);
 
     return step;
@@ -271,6 +273,118 @@ fn addShellCompletionTests(
     }
 }
 
+fn addNestedTests(
+    b: *std.Build,
+    step: *std.Build.Step,
+    nested_exe: *std.Build.Step.Compile,
+) void {
+    {
+        const run = b.addRunArtifact(nested_exe);
+        run.addArgs(&.{ "server", "start" });
+        run.expectStdOutEqual("starting server on port 8080\n");
+        step.dependOn(&run.step);
+    }
+    {
+        const run = b.addRunArtifact(nested_exe);
+        run.addArgs(&.{ "server", "start", "--port", "9090" });
+        run.expectStdOutEqual("starting server on port 9090\n");
+        step.dependOn(&run.step);
+    }
+    {
+        const run = b.addRunArtifact(nested_exe);
+        run.addArgs(&.{ "server", "stop" });
+        run.expectStdOutEqual("stopping server\n");
+        step.dependOn(&run.step);
+    }
+    {
+        const run = b.addRunArtifact(nested_exe);
+        run.addArgs(&.{ "server", "stop", "--force" });
+        run.expectStdOutEqual("force stopping server\n");
+        step.dependOn(&run.step);
+    }
+    {
+        const run = b.addRunArtifact(nested_exe);
+        run.addArgs(&.{"version"});
+        run.expectStdOutEqual("1.0.0\n");
+        step.dependOn(&run.step);
+    }
+    // nested --help shows top-level subcommands
+    {
+        const run = b.addRunArtifact(nested_exe);
+        run.addArgs(&.{"--help"});
+        run.expectStdOutMatch("server");
+        step.dependOn(&run.step);
+    }
+    {
+        const run = b.addRunArtifact(nested_exe);
+        run.addArgs(&.{"--help"});
+        run.expectStdOutMatch("version");
+        step.dependOn(&run.step);
+    }
+    // nested server --help shows sub-subcommands
+    {
+        const run = b.addRunArtifact(nested_exe);
+        run.addArgs(&.{ "server", "--help" });
+        run.expectStdOutMatch("start");
+        step.dependOn(&run.step);
+    }
+    {
+        const run = b.addRunArtifact(nested_exe);
+        run.addArgs(&.{ "server", "--help" });
+        run.expectStdOutMatch("stop");
+        step.dependOn(&run.step);
+    }
+    // nested server start --help shows start's options
+    {
+        const run = b.addRunArtifact(nested_exe);
+        run.addArgs(&.{ "server", "start", "--help" });
+        run.expectStdOutMatch("--port");
+        step.dependOn(&run.step);
+    }
+    // nested server (no subcommand) shows help
+    {
+        const run = b.addRunArtifact(nested_exe);
+        run.addArgs(&.{"server"});
+        run.expectStdOutMatch("USAGE:");
+        step.dependOn(&run.step);
+    }
+    // unknown sub-subcommand
+    {
+        const run = b.addRunArtifact(nested_exe);
+        run.addArgs(&.{ "server", "badcmd" });
+        run.expectStdErrMatch("unknown subcommand 'badcmd'");
+        run.expectExitCode(1);
+        step.dependOn(&run.step);
+    }
+    // typo suggestion at nested level
+    {
+        const run = b.addRunArtifact(nested_exe);
+        run.addArgs(&.{ "server", "strat" });
+        run.expectStdErrMatch("did you mean 'start'");
+        run.expectExitCode(1);
+        step.dependOn(&run.step);
+    }
+    // completion scripts
+    {
+        const run = b.addRunArtifact(nested_exe);
+        run.addArgs(&.{ "--generate-completion-script", "fish" });
+        run.expectStdOutMatch("complete -c nested");
+        step.dependOn(&run.step);
+    }
+    {
+        const run = b.addRunArtifact(nested_exe);
+        run.addArgs(&.{ "--generate-completion-script", "zsh" });
+        run.expectStdOutMatch("#compdef nested");
+        step.dependOn(&run.step);
+    }
+    {
+        const run = b.addRunArtifact(nested_exe);
+        run.addArgs(&.{ "--generate-completion-script", "bash" });
+        run.expectStdOutMatch("complete -F");
+        step.dependOn(&run.step);
+    }
+}
+
 fn addCompileErrorTests(
     b: *std.Build,
     step: *std.Build.Step,
@@ -296,7 +410,33 @@ fn addCompileErrorTests(
                 .imports = &.{.{ .name = "zap", .module = zap_mod }},
             }),
         });
-        exe.expect_errors = .{ .contains = "must have a pub fn run() or subcommands" };
+        exe.expect_errors = .{ .contains = "Cmd' must have a pub fn run() or subcommands" };
+        step.dependOn(&exe.step);
+    }
+    {
+        const wf = b.addWriteFiles();
+        const source = wf.add("nested_missing_run.zig",
+            \\const std = @import("std");
+            \\const zap = @import("zap");
+            \\const Bad = struct {};
+            \\const Parent = struct {
+            \\    pub const meta: zap.CommandMeta = .{
+            \\        .subcommands = &.{Bad},
+            \\    };
+            \\};
+            \\pub fn main(init: std.process.Init) !void {
+            \\    return zap.run(Parent, init);
+            \\}
+        );
+        const exe = b.addExecutable(.{
+            .name = "nested_missing_run",
+            .root_module = b.createModule(.{
+                .root_source_file = source,
+                .target = zap_mod.resolved_target,
+                .imports = &.{.{ .name = "zap", .module = zap_mod }},
+            }),
+        });
+        exe.expect_errors = .{ .contains = "Bad' must have a pub fn run() or subcommands" };
         step.dependOn(&exe.step);
     }
 }
