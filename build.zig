@@ -5,19 +5,52 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const zap_mod = b.addModule("zap", .{
-        .root_source_file = b.path("src/zap.zig"),
+    const core_mod = b.addModule("zap_core", .{
+        .root_source_file = b.path("src/core/root.zig"),
         .target = target,
         .optimize = optimize,
     });
 
-    const lib_tests = b.addTest(.{
-        .root_module = zap_mod,
+    const parse_mod = b.addModule("zap_parse", .{
+        .root_source_file = b.path("src/parse/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "zap_core", .module = core_mod }},
     });
-    const run_lib_tests = b.addRunArtifact(lib_tests);
 
+    const help_mod = b.addModule("zap_help", .{
+        .root_source_file = b.path("src/help/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "zap_core", .module = core_mod }},
+    });
+
+    const completions_mod = b.addModule("zap_completions", .{
+        .root_source_file = b.path("src/completions/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "zap_core", .module = core_mod }},
+    });
+
+    const zap_mod = b.addModule("zap", .{
+        .root_source_file = b.path("src/zap.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zap_core", .module = core_mod },
+            .{ .name = "zap_parse", .module = parse_mod },
+            .{ .name = "zap_help", .module = help_mod },
+            .{ .name = "zap_completions", .module = completions_mod },
+        },
+    });
+
+    // Each module is tested independently so its boundaries (and its tests) are
+    // exercised on their own, not just transitively through the facade.
     const test_step = b.step("test", "Run all tests");
-    test_step.dependOn(&run_lib_tests.step);
+    for ([_]*std.Build.Module{ core_mod, parse_mod, help_mod, completions_mod, zap_mod }) |mod| {
+        const mod_tests = b.addTest(.{ .root_module = mod });
+        test_step.dependOn(&b.addRunArtifact(mod_tests).step);
+    }
 
     const add_exe = b.addExecutable(.{
         .name = "add",

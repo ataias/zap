@@ -1,12 +1,11 @@
 const std = @import("std");
-pub const core = @import("core/root.zig");
-pub const introspect = @import("core/introspect.zig");
-pub const parse = @import("parse/root.zig");
-pub const help = @import("help/root.zig");
-pub const complete = @import("completions/root.zig");
+pub const core = @import("zap_core");
+pub const parse = @import("zap_parse");
+pub const help = @import("zap_help");
+pub const complete = @import("zap_completions");
 
-pub const ArgInfo = introspect.ArgInfo;
-pub const ArgKind = introspect.ArgKind;
+pub const ArgInfo = core.ArgInfo;
+pub const ArgKind = core.ArgKind;
 
 pub const CommandMeta = core.CommandMeta;
 pub const Positional = core.Positional;
@@ -173,12 +172,4 @@ fn commandName(comptime T: type) []const u8 {
             full;
         return core.camelToKebab(short);
     }
-}
-
-test {
-    _ = core;
-    _ = introspect;
-    _ = parse;
-    _ = help;
-    _ = complete;
 }

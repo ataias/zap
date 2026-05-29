@@ -1,8 +1,7 @@
 const std = @import("std");
-const core = @import("../core/root.zig");
-const introspect_mod = @import("../core/introspect.zig");
-const ArgInfo = introspect_mod.ArgInfo;
-const ArgKind = introspect_mod.ArgKind;
+const core = @import("zap_core");
+const ArgInfo = core.ArgInfo;
+const ArgKind = core.ArgKind;
 const subcommandName = core.subcommandName;
 
 pub fn generateHelp(
@@ -10,7 +9,7 @@ pub fn generateHelp(
     command_name: []const u8,
     writer: *std.Io.Writer,
 ) !void {
-    const arg_infos = comptime introspect_mod.introspect(T);
+    const arg_infos = comptime core.introspect(T);
     const description = if (@hasDecl(T, "meta")) T.meta.description else "";
     const field_descriptions = if (@hasDecl(T, "meta") and @hasField(@TypeOf(T.meta), "field_descriptions"))
         T.meta.field_descriptions

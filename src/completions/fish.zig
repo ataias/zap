@@ -1,8 +1,7 @@
 const std = @import("std");
-const introspect_mod = @import("../core/introspect.zig");
-const core = @import("../core/root.zig");
-const ArgInfo = introspect_mod.ArgInfo;
-const ArgKind = introspect_mod.ArgKind;
+const core = @import("zap_core");
+const ArgInfo = core.ArgInfo;
+const ArgKind = core.ArgKind;
 const complete_mod = @import("root.zig");
 const CompletionHint = complete_mod.CompletionHint;
 const getCompletionHint = complete_mod.getCompletionHint;
@@ -93,7 +92,7 @@ fn writeCommand(
     comptime cmd_name: []const u8,
     comptime condition: ?[]const u8,
 ) !void {
-    const arg_infos = comptime introspect_mod.introspect(Command);
+    const arg_infos = comptime core.introspect(Command);
     const hidden_fields: []const []const u8 = comptime if (@hasDecl(Command, "meta") and
         @hasField(@TypeOf(Command.meta), "hidden_fields"))
         Command.meta.hidden_fields

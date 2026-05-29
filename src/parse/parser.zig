@@ -1,10 +1,9 @@
 const std = @import("std");
-const core = @import("../core/root.zig");
-const introspect_mod = @import("../core/introspect.zig");
+const core = @import("zap_core");
 const Tokenizer = @import("tokenizer.zig").Tokenizer;
 const Token = @import("tokenizer.zig").Token;
-const ArgInfo = introspect_mod.ArgInfo;
-const ArgKind = introspect_mod.ArgKind;
+const ArgInfo = core.ArgInfo;
+const ArgKind = core.ArgKind;
 const errors = @import("errors.zig");
 const ParseError = core.ParseError;
 
@@ -53,7 +52,7 @@ fn fieldIndex(comptime T: type, comptime name: []const u8) comptime_int {
 }
 
 pub fn parseArgs(comptime T: type, argv: []const []const u8, allocator: std.mem.Allocator, reporter: *std.Io.Writer) ParseError!T {
-    const arg_infos = comptime introspect_mod.introspect(T);
+    const arg_infos = comptime core.introspect(T);
     const fields = @typeInfo(T).@"struct".fields;
 
     var result: T = undefined;
@@ -226,7 +225,7 @@ fn setFlag(
         }
         field_set[i] = true;
     } else if (@typeInfo(inner) == .int) {
-        const info = comptime introspect_mod.introspect(T);
+        const info = comptime core.introspect(T);
         if (info[i].kind == .counted_flag) {
             @field(result, f.name) += 1;
             field_set[i] = true;
@@ -328,7 +327,7 @@ fn handlePositional(
     allocator: std.mem.Allocator,
     reporter: *std.Io.Writer,
 ) ParseError!void {
-    const arg_infos = comptime introspect_mod.introspect(T);
+    const arg_infos = comptime core.introspect(T);
     const fields = @typeInfo(T).@"struct".fields;
 
     comptime var multi_idx: ?usize = null;

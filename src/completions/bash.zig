@@ -1,8 +1,7 @@
 const std = @import("std");
-const introspect_mod = @import("../core/introspect.zig");
-const core = @import("../core/root.zig");
-const ArgInfo = introspect_mod.ArgInfo;
-const ArgKind = introspect_mod.ArgKind;
+const core = @import("zap_core");
+const ArgInfo = core.ArgInfo;
+const ArgKind = core.ArgKind;
 const complete_mod = @import("root.zig");
 const CompletionHint = complete_mod.CompletionHint;
 const getCompletionHint = complete_mod.getCompletionHint;
@@ -45,7 +44,7 @@ fn writePrevCaseBlock(
     writer: *std.Io.Writer,
     comptime Command: type,
 ) !void {
-    const arg_infos = comptime introspect_mod.introspect(Command);
+    const arg_infos = comptime core.introspect(Command);
     const hidden_fields: []const []const u8 = comptime if (@hasDecl(Command, "meta") and
         @hasField(@TypeOf(Command.meta), "hidden_fields"))
         Command.meta.hidden_fields
@@ -100,7 +99,7 @@ fn writeAllOptsCompreply(
     writer: *std.Io.Writer,
     comptime Command: type,
 ) !void {
-    const arg_infos = comptime introspect_mod.introspect(Command);
+    const arg_infos = comptime core.introspect(Command);
     const hidden_fields: []const []const u8 = comptime if (@hasDecl(Command, "meta") and
         @hasField(@TypeOf(Command.meta), "hidden_fields"))
         Command.meta.hidden_fields
@@ -135,7 +134,7 @@ fn writeAllOptsCompreply(
 /// bodies (writeSubcommandBody) to avoid duplicating the filtering logic.
 fn writeFilteredCompreply(
     writer: *std.Io.Writer,
-    comptime arg_infos: []const introspect_mod.ArgInfo,
+    comptime arg_infos: []const ArgInfo,
     comptime hidden_fields: []const []const u8,
     comptime indent: []const u8,
     comptime positional_enum_values: []const []const u8,
@@ -260,7 +259,7 @@ fn writeLeafBody(
     comptime Sub: type,
     comptime ind: []const u8,
 ) !void {
-    const sub_arg_infos = comptime introspect_mod.introspect(Sub);
+    const sub_arg_infos = comptime core.introspect(Sub);
     const sub_hidden: []const []const u8 = comptime if (@hasDecl(Sub, "meta") and
         @hasField(@TypeOf(Sub.meta), "hidden_fields"))
         Sub.meta.hidden_fields
