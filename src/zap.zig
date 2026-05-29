@@ -2,8 +2,8 @@ const std = @import("std");
 pub const core = @import("core/root.zig");
 pub const introspect = @import("core/introspect.zig");
 pub const parse = @import("parse/root.zig");
-pub const help = @import("help.zig");
-pub const complete = @import("complete.zig");
+pub const help = @import("help/root.zig");
+pub const complete = @import("completions/root.zig");
 
 pub const ArgInfo = introspect.ArgInfo;
 pub const ArgKind = introspect.ArgKind;

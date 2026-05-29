@@ -1,7 +1,7 @@
 const std = @import("std");
-pub const fish = @import("complete/fish.zig");
-pub const zsh = @import("complete/zsh.zig");
-pub const bash = @import("complete/bash.zig");
+pub const fish = @import("fish.zig");
+pub const zsh = @import("zsh.zig");
+pub const bash = @import("bash.zig");
 
 pub const Shell = enum { fish, zsh, bash };
 
