@@ -1,10 +1,8 @@
 const std = @import("std");
 pub const core = @import("core/root.zig");
 pub const introspect = @import("core/introspect.zig");
-pub const tokenizer = @import("tokenizer.zig");
-pub const parser = @import("parser.zig");
+pub const parse = @import("parse/root.zig");
 pub const help = @import("help.zig");
-pub const errors = @import("errors.zig");
 pub const complete = @import("complete.zig");
 
 pub const ArgInfo = introspect.ArgInfo;
@@ -14,7 +12,7 @@ pub const CommandMeta = core.CommandMeta;
 pub const Positional = core.Positional;
 
 pub fn parseFromSlice(comptime T: type, argv: []const []const u8, allocator: std.mem.Allocator, reporter: *std.Io.Writer) core.ParseError!T {
-    return parser.parseArgs(T, argv, allocator, reporter);
+    return parse.parseArgs(T, argv, allocator, reporter);
 }
 
 pub fn run(comptime T: type, init: std.process.Init) !void {
@@ -72,12 +70,12 @@ fn dispatchSubcommands(
             }
         }
 
-        if (errors.suggestClosest(first, &subcommand_names)) |suggestion| {
-            errors.printError(reporter, "unknown subcommand '{s}', did you mean '{s}'?", .{ first, suggestion });
+        if (parse.suggestClosest(first, &subcommand_names)) |suggestion| {
+            parse.printError(reporter, "unknown subcommand '{s}', did you mean '{s}'?", .{ first, suggestion });
         } else {
-            errors.printError(reporter, "unknown subcommand '{s}'", .{first});
+            parse.printError(reporter, "unknown subcommand '{s}'", .{first});
         }
-        errors.printUsageHint(reporter, cmd_name);
+        printUsageHint(reporter, cmd_name);
         reporter.flush() catch {};
         std.process.exit(1);
     }
@@ -111,7 +109,7 @@ fn runSubcommand(
     const instance = parseFromSlice(Sub, argv, init.arena.allocator(), reporter) catch |err| switch (err) {
         error.HelpRequested => printHelpAndExit(Sub, cmd_name, init.io),
         else => {
-            errors.printUsageHint(reporter, cmd_name);
+            printUsageHint(reporter, cmd_name);
             reporter.flush() catch {};
             std.process.exit(1);
         },
@@ -123,7 +121,7 @@ fn parseOrExit(comptime T: type, comptime cmd_name: []const u8, argv: []const []
     return parseFromSlice(T, argv, init.arena.allocator(), reporter) catch |err| switch (err) {
         error.HelpRequested => printHelpAndExit(T, cmd_name, init.io),
         else => {
-            errors.printUsageHint(reporter, cmd_name);
+            printUsageHint(reporter, cmd_name);
             reporter.flush() catch {};
             std.process.exit(1);
         },
@@ -162,6 +160,10 @@ fn printHelpAndExit(comptime T: type, comptime cmd_name: []const u8, io: std.Io)
     std.process.exit(0);
 }
 
+fn printUsageHint(reporter: *std.Io.Writer, command_name: []const u8) void {
+    reporter.print("See '{s} --help' for more information.\n", .{command_name}) catch {};
+}
+
 fn commandName(comptime T: type) []const u8 {
     comptime {
         const full = @typeName(T);
@@ -176,9 +178,7 @@ fn commandName(comptime T: type) []const u8 {
 test {
     _ = core;
     _ = introspect;
-    _ = tokenizer;
-    _ = parser;
+    _ = parse;
     _ = help;
-    _ = errors;
     _ = complete;
 }

@@ -4,10 +4,6 @@ pub fn printError(reporter: *std.Io.Writer, comptime fmt: []const u8, args: anyt
     reporter.print("error: " ++ fmt ++ "\n", args) catch {};
 }
 
-pub fn printUsageHint(reporter: *std.Io.Writer, command_name: []const u8) void {
-    reporter.print("See '{s} --help' for more information.\n", .{command_name}) catch {};
-}
-
 pub fn levenshteinDistance(a: []const u8, b: []const u8) usize {
     if (a.len == 0) return b.len;
     if (b.len == 0) return a.len;
