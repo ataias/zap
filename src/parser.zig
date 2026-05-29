@@ -1,12 +1,12 @@
 const std = @import("std");
-const introspect_mod = @import("introspect.zig");
+const core = @import("core/root.zig");
+const introspect_mod = @import("core/introspect.zig");
 const Tokenizer = @import("tokenizer.zig").Tokenizer;
 const Token = @import("tokenizer.zig").Token;
 const ArgInfo = introspect_mod.ArgInfo;
 const ArgKind = introspect_mod.ArgKind;
-const zap = @import("zap.zig");
 const errors = @import("errors.zig");
-const ParseError = errors.ParseError;
+const ParseError = core.ParseError;
 
 fn isPositionalWrapper(comptime T: type) bool {
     return @typeInfo(T) == .@"struct" and @hasDecl(T, "__zap_positional_marker");
@@ -536,7 +536,7 @@ test "counted flag" {
 
 test "missing required argument" {
     const Cmd = struct {
-        name: zap.Positional([]const u8),
+        name: core.Positional([]const u8),
     };
     var buf: [4096]u8 = undefined;
     var reporter = testReporter(&buf);

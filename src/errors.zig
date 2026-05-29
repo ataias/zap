@@ -1,15 +1,5 @@
 const std = @import("std");
 
-pub const ParseError = error{
-    MissingRequiredOption,
-    MissingRequiredArgument,
-    UnknownOption,
-    InvalidValue,
-    UnexpectedPositional,
-    MissingOptionValue,
-    HelpRequested,
-};
-
 pub fn printError(reporter: *std.Io.Writer, comptime fmt: []const u8, args: anytype) void {
     reporter.print("error: " ++ fmt ++ "\n", args) catch {};
 }

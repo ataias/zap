@@ -1,4 +1,5 @@
 const std = @import("std");
+const snakeToKebab = @import("text.zig").snakeToKebab;
 
 pub const ArgKind = enum {
     flag,
@@ -33,17 +34,6 @@ fn unwrapOptional(comptime T: type) struct { child: type, is_optional: bool } {
         .optional => |opt| .{ .child = opt.child, .is_optional = true },
         else => .{ .child = T, .is_optional = false },
     };
-}
-
-fn snakeToKebab(comptime name: []const u8) []const u8 {
-    comptime {
-        var result: [name.len]u8 = undefined;
-        for (name, 0..) |c, i| {
-            result[i] = if (c == '_') '-' else c;
-        }
-        const final = result;
-        return &final;
-    }
 }
 
 fn typeDisplayName(comptime T: type) []const u8 {

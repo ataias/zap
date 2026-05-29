@@ -1,7 +1,9 @@
 const std = @import("std");
-const introspect_mod = @import("introspect.zig");
+const core = @import("core/root.zig");
+const introspect_mod = @import("core/introspect.zig");
 const ArgInfo = introspect_mod.ArgInfo;
 const ArgKind = introspect_mod.ArgKind;
+const subcommandName = core.subcommandName;
 
 pub fn generateHelp(
     comptime T: type,
@@ -157,43 +159,10 @@ fn getFieldDescription(field_descriptions: anytype, field_name: []const u8) ?[]c
     return null;
 }
 
-pub fn subcommandName(comptime T: type) []const u8 {
-    comptime {
-        const full = @typeName(T);
-        const short = if (std.mem.lastIndexOfScalar(u8, full, '.')) |dot|
-            full[dot + 1 ..]
-        else
-            full;
-        return camelToKebab(short);
-    }
-}
-
-pub fn camelToKebab(comptime name: []const u8) []const u8 {
-    comptime {
-        var len: usize = 0;
-        for (name, 0..) |c, i| {
-            if (c >= 'A' and c <= 'Z' and i > 0) len += 1;
-            len += 1;
-        }
-        var result: [len]u8 = undefined;
-        var j: usize = 0;
-        for (name, 0..) |c, i| {
-            if (c >= 'A' and c <= 'Z' and i > 0) {
-                result[j] = '-';
-                j += 1;
-            }
-            result[j] = if (c >= 'A' and c <= 'Z') c + 32 else c;
-            j += 1;
-        }
-        const final = result;
-        return &final;
-    }
-}
-
 // --- Tests ---
 
 const testing = std.testing;
-const CommandMeta = @import("zap.zig").CommandMeta;
+const CommandMeta = core.CommandMeta;
 
 test "help for simple command" {
     const Cmd = struct {
@@ -314,7 +283,7 @@ test "help with subcommands" {
 test "help with optional positional" {
     const Cmd = struct {
         pub const meta: CommandMeta = .{ .description = "Greet someone" };
-        name: ?@import("zap.zig").Positional([]const u8) = null,
+        name: ?core.Positional([]const u8) = null,
     };
 
     var buf: [4096]u8 = undefined;
@@ -476,11 +445,4 @@ test "help with nested subcommands" {
         \\  -h, --help             Show help information
         \\
     , writer.buffered());
-}
-
-test "camelToKebab" {
-    try testing.expectEqualStrings("add", comptime camelToKebab("Add"));
-    try testing.expectEqualStrings("multiply", comptime camelToKebab("Multiply"));
-    try testing.expectEqualStrings("hex-output", comptime camelToKebab("HexOutput"));
-    try testing.expectEqualStrings("standard-deviation", comptime camelToKebab("StandardDeviation"));
 }

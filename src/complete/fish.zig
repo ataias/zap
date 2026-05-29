@@ -1,6 +1,6 @@
 const std = @import("std");
-const introspect_mod = @import("../introspect.zig");
-const help_mod = @import("../help.zig");
+const introspect_mod = @import("../core/introspect.zig");
+const core = @import("../core/root.zig");
 const ArgInfo = introspect_mod.ArgInfo;
 const ArgKind = introspect_mod.ArgKind;
 const complete_mod = @import("../complete.zig");
@@ -40,7 +40,7 @@ fn generateBranch(
     try writeCommand(writer, Command, cmd_name, condition);
 
     inline for (Command.meta.subcommands) |Sub| {
-        const sub_name = comptime help_mod.subcommandName(Sub);
+        const sub_name = comptime core.subcommandName(Sub);
         if (comptime isHiddenComptime(hidden_subcommands, sub_name)) continue;
         const sub_desc = if (@hasDecl(Sub, "meta")) Sub.meta.description else "";
         try writer.print("complete -c {s} -n '{s}' -f -a {s}", .{ cmd_name, condition, sub_name });
@@ -53,7 +53,7 @@ fn generateBranch(
     }
 
     inline for (Command.meta.subcommands) |Sub| {
-        const sub_name = comptime help_mod.subcommandName(Sub);
+        const sub_name = comptime core.subcommandName(Sub);
         if (comptime isHiddenComptime(hidden_subcommands, sub_name)) continue;
 
         const sub_has_subs = @hasDecl(Sub, "meta") and
@@ -70,7 +70,7 @@ fn generateBranch(
 
 fn branchCondition(comptime Command: type) []const u8 {
     comptime {
-        const parent_name = help_mod.subcommandName(Command);
+        const parent_name = core.subcommandName(Command);
         const hidden: []const []const u8 = if (@hasDecl(Command, "meta") and
             @hasField(@TypeOf(Command.meta), "hidden_subcommands"))
             Command.meta.hidden_subcommands
@@ -79,7 +79,7 @@ fn branchCondition(comptime Command: type) []const u8 {
 
         var result: []const u8 = "__fish_seen_subcommand_from " ++ parent_name ++ "; and not __fish_seen_subcommand_from";
         for (Command.meta.subcommands) |Sub| {
-            const sub_name = help_mod.subcommandName(Sub);
+            const sub_name = core.subcommandName(Sub);
             if (isHiddenComptime(hidden, sub_name)) continue;
             result = result ++ " " ++ sub_name;
         }
@@ -229,8 +229,8 @@ fn writeFishEscaped(writer: *std.Io.Writer, s: []const u8) !void {
 // --- Tests ---
 
 const testing = std.testing;
-const CommandMeta = @import("../zap.zig").CommandMeta;
-const Positional = @import("../zap.zig").Positional;
+const CommandMeta = core.CommandMeta;
+const Positional = core.Positional;
 
 test "fish: simple command with flags and options" {
     const Cmd = struct {

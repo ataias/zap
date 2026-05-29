@@ -1,5 +1,6 @@
 const std = @import("std");
-pub const introspect = @import("introspect.zig");
+pub const core = @import("core/root.zig");
+pub const introspect = @import("core/introspect.zig");
 pub const tokenizer = @import("tokenizer.zig");
 pub const parser = @import("parser.zig");
 pub const help = @import("help.zig");
@@ -9,22 +10,10 @@ pub const complete = @import("complete.zig");
 pub const ArgInfo = introspect.ArgInfo;
 pub const ArgKind = introspect.ArgKind;
 
-pub const CommandMeta = struct {
-    description: []const u8 = "",
-    subcommands: []const type = &.{},
-    hidden_fields: []const []const u8 = &.{},
-    hidden_subcommands: []const []const u8 = &.{},
-};
+pub const CommandMeta = core.CommandMeta;
+pub const Positional = core.Positional;
 
-pub fn Positional(comptime T: type) type {
-    return struct {
-        pub const __zap_positional_marker = {};
-        pub const Inner = T;
-        value: T,
-    };
-}
-
-pub fn parseFromSlice(comptime T: type, argv: []const []const u8, allocator: std.mem.Allocator, reporter: *std.Io.Writer) errors.ParseError!T {
+pub fn parseFromSlice(comptime T: type, argv: []const []const u8, allocator: std.mem.Allocator, reporter: *std.Io.Writer) core.ParseError!T {
     return parser.parseArgs(T, argv, allocator, reporter);
 }
 
@@ -72,7 +61,7 @@ fn dispatchSubcommands(
         const subcommand_names = comptime blk: {
             var names: [T.meta.subcommands.len][]const u8 = undefined;
             for (T.meta.subcommands, 0..) |Sub, i| {
-                names[i] = help.subcommandName(Sub);
+                names[i] = core.subcommandName(Sub);
             }
             break :blk names;
         };
@@ -180,11 +169,12 @@ fn commandName(comptime T: type) []const u8 {
             full[dot + 1 ..]
         else
             full;
-        return help.camelToKebab(short);
+        return core.camelToKebab(short);
     }
 }
 
 test {
+    _ = core;
     _ = introspect;
     _ = tokenizer;
     _ = parser;

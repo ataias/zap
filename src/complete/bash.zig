@@ -1,6 +1,6 @@
 const std = @import("std");
-const introspect_mod = @import("../introspect.zig");
-const help_mod = @import("../help.zig");
+const introspect_mod = @import("../core/introspect.zig");
+const core = @import("../core/root.zig");
 const ArgInfo = introspect_mod.ArgInfo;
 const ArgKind = introspect_mod.ArgKind;
 const complete_mod = @import("../complete.zig");
@@ -220,7 +220,7 @@ fn writeSubcommandBody(
 
     var first = true;
     inline for (Command.meta.subcommands) |Sub| {
-        const sub_name = comptime help_mod.subcommandName(Sub);
+        const sub_name = comptime core.subcommandName(Sub);
         if (comptime isHiddenComptime(hidden_subcommands, sub_name)) continue;
         if (!first) try writer.writeByte(' ');
         try writer.writeAll(sub_name);
@@ -234,7 +234,7 @@ fn writeSubcommandBody(
     try writer.print("\n{s}case \"${{COMP_WORDS[{d}]}}\" in\n", .{ ind, depth });
 
     inline for (Command.meta.subcommands) |Sub| {
-        const sub_name = comptime help_mod.subcommandName(Sub);
+        const sub_name = comptime core.subcommandName(Sub);
         if (comptime isHiddenComptime(hidden_subcommands, sub_name)) continue;
 
         const sub_has_subs = @hasDecl(Sub, "meta") and
@@ -367,8 +367,8 @@ fn cmdToFuncName(comptime name: []const u8) []const u8 {
 // --- Tests ---
 
 const testing = std.testing;
-const CommandMeta = @import("../zap.zig").CommandMeta;
-const Positional = @import("../zap.zig").Positional;
+const CommandMeta = core.CommandMeta;
+const Positional = core.Positional;
 
 test "bash: simple command with flags and options" {
     const Format = enum { json, yaml, text };
