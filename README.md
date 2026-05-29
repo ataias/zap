@@ -68,7 +68,7 @@ OPTIONS:
 
 ## Installation
 
-Requires Zig `master` (minimum `0.16.0-dev.2261+d6b3dd25a`).
+Requires Zig `0.16.0`.
 
 Add zap as a dependency in your `build.zig.zon`:
 
